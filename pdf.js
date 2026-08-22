@@ -161,7 +161,16 @@ function newPageCanvas() {
   return { canvas, ctx };
 }
 
-function drawFooter(ctx, pageNum, isRtl, reportTitle) {
+function truncateSingleLine(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let truncated = text;
+  while (truncated.length > 1 && ctx.measureText(truncated + " …").width > maxWidth) {
+    truncated = truncated.slice(0, -1);
+  }
+  return truncated.trim() + " …";
+}
+
+function drawFooter(ctx, pageNum, isRtl, reportTitle, footerText) {
   ctx.strokeStyle = PDF_COLORS.border;
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -169,24 +178,51 @@ function drawFooter(ctx, pageNum, isRtl, reportTitle) {
   ctx.lineTo(PAGE_W - MARGIN, PAGE_H - 55);
   ctx.stroke();
 
+  // Report title — always bottom-right corner (decoupled from isRtl on
+  // purpose, so it never collides with the credit line below, which
+  // always sits at the bottom-left regardless of language). Truncated
+  // to fit the space between the margin and the centered page number,
+  // so a long title can never overlap either element.
   ctx.fillStyle = PDF_COLORS.muted;
   ctx.font = "20px Geeza Pro, Cairo, Arial, sans-serif";
   ctx.direction = isRtl ? "rtl" : "ltr";
-  ctx.textAlign = isRtl ? "right" : "left";
-  ctx.fillText(reportTitle, isRtl ? PAGE_W - MARGIN : MARGIN, PAGE_H - 22);
+  ctx.textAlign = "right";
+  const maxTitleWidth = PAGE_W - MARGIN - (PAGE_W / 2 + 90);
+  ctx.fillText(truncateSingleLine(ctx, reportTitle, maxTitleWidth), PAGE_W - MARGIN, PAGE_H - 22);
 
+  // Page number, centered
   ctx.textAlign = "center";
   ctx.fillText(String(pageNum), PAGE_W / 2, PAGE_H - 22);
+
+  // Credit line — always bottom-left, on every page. User-configurable
+  // (Report Settings → "نص التذييل"), falls back to the default text.
+  // Truncated the same way as the title so a long custom value can
+  // never reach the page edge or collide with the page number.
+  const text = (footerText && footerText.trim()) || "إعداد: م. ص.س.م / ولاء الجابري";
+  ctx.fillStyle = PDF_COLORS.muted;
+  ctx.font = "600 18px Geeza Pro, Cairo, Arial, sans-serif";
+  ctx.direction = "rtl";
+  ctx.textAlign = "left";
+  const maxCreditWidth = PAGE_W / 2 - 90 - MARGIN;
+  ctx.fillText(truncateSingleLine(ctx, text, maxCreditWidth), MARGIN, PAGE_H - 22);
 }
 
 function drawFirstPageHeader(ctx, report, isRtl, lang) {
-  const bandHeight = 250;
+  const rightX = isRtl ? PAGE_W - MARGIN : MARGIN;
+  const eyebrow = lang === "ar" ? "تقرير زيارة مدرسة" : "SCHOOL VISIT REPORT";
+
+  // Wrap the title to at most 2 lines (rather than letting it run off
+  // the page edge), and only grow the band height when a second line
+  // is actually needed — short titles keep the exact original layout.
+  const titleLineHeight = 46;
+  const baseTitleY = MARGIN + 78;
+  ctx.font = "800 40px Geeza Pro, Cairo, Arial, sans-serif";
+  let titleLines = wrapText(ctx, report.title || "", PAGE_W - MARGIN * 2);
+  titleLines = truncateLines(titleLines, 2);
+  const bandHeight = 250 + (titleLines.length > 1 ? titleLineHeight : 0);
 
   ctx.fillStyle = PDF_COLORS.primary;
   ctx.fillRect(0, 0, PAGE_W, bandHeight);
-
-  const rightX = isRtl ? PAGE_W - MARGIN : MARGIN;
-  const eyebrow = lang === "ar" ? "تقرير زيارة مدرسة" : "SCHOOL VISIT REPORT";
 
   ctx.font = "700 22px Geeza Pro, Cairo, Arial, sans-serif";
   ctx.direction = isRtl ? "rtl" : "ltr";
@@ -196,8 +232,13 @@ function drawFirstPageHeader(ctx, report, isRtl, lang) {
 
   ctx.fillStyle = "#ffffff";
   ctx.font = "800 40px Geeza Pro, Cairo, Arial, sans-serif";
-  ctx.fillText(report.title, rightX, MARGIN + 78);
+  let titleY = baseTitleY;
+  titleLines.forEach((line) => {
+    ctx.fillText(line, rightX, titleY);
+    titleY += titleLineHeight;
+  });
 
+  const metaY = baseTitleY + (titleLines.length - 1) * titleLineHeight + 36;
   const metaParts = [
     report.location,
     report.date,
@@ -205,7 +246,7 @@ function drawFirstPageHeader(ctx, report, isRtl, lang) {
   ];
   ctx.fillStyle = "rgba(255,255,255,0.8)";
   ctx.font = "24px Geeza Pro, Cairo, Arial, sans-serif";
-  ctx.fillText(metaParts.join("   •   "), rightX, MARGIN + 114);
+  ctx.fillText(metaParts.join("   •   "), rightX, metaY);
 
   return bandHeight + 40;
 }
@@ -387,7 +428,7 @@ async function generatePdf(report) {
   let isFirstRowOnPage = true;
 
   const finishPage = () => {
-    drawFooter(ctx, pageIndex + 1, isRtl, report.title);
+    drawFooter(ctx, pageIndex + 1, isRtl, report.title, report.photoSettings && report.photoSettings.footerText);
     pdf.addImage(canvas.toDataURL("image/jpeg", 0.97), "JPEG", 0, 0, 210, 297);
   };
 

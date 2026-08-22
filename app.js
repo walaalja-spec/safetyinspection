@@ -5,6 +5,32 @@
 // lives in pdf.js.
 // ---------------------------------------------------------------------
 
+// Single source of truth for observation categories — used to populate
+// both the manual category field and the AI review screen's dropdown,
+// and mirrored in worker.js's AI prompt so the AI only ever picks from
+// this exact list.
+const OBSERVATION_CATEGORIES = [
+  "كهرباء", "كهرباء وإنارة", "سباكة", "دورات مياه", "تكييف وتبريد",
+  "حريق", "السلامة", "مخارج طوارئ", "سلامة المبنى", "الأرضيات",
+  "الأبواب والنوافذ", "أسقف وجدران", "النظافة", "المواد الكيميائية",
+  "معدات السلامة", "الإسعافات الأولية", "التمديدات", "المخاطر العامة", "أخرى"
+];
+
+function populateCategorySelects() {
+  const aiSelect = document.getElementById("aiCategorySelect");
+  const aiPrev = aiSelect.value;
+  aiSelect.innerHTML = OBSERVATION_CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join("");
+  if (aiPrev) aiSelect.value = aiPrev;
+
+  const manualSelect = document.getElementById("observationCategorySelect");
+  const manualPrev = manualSelect.value;
+  const blankLabel = currentLang === "ar" ? "بدون تصنيف" : "No category";
+  manualSelect.innerHTML =
+    `<option value="">${blankLabel}</option>` +
+    OBSERVATION_CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join("");
+  manualSelect.value = manualPrev || "";
+}
+
 let currentLang = "ar";
 let activeReport = null;         // full report object currently open
 let editingIndex = null;         // index into activeReport.observations, or null = new
@@ -59,6 +85,8 @@ const translations = {
     settingInspector: "اسم المشرفة",
     inspectorNamePlaceholder: "اسم المشرفة / المشرف",
     pdfImageTypeHeading: "نوع الصورة في التقرير",
+    footerTextHeading: "نص التذييل (أسفل كل صفحة بالتقرير)",
+    footerTextPlaceholder: "إعداد: م. ص.س.م / ولاء الجابري",
     pdfImageDocumented: "الصورة الموثقة",
     pdfImageOriginal: "الصورة الأصلية",
     btnSaveSettings: "حفظ الإعدادات",
@@ -98,7 +126,7 @@ const translations = {
     btnImportBackup: "📂 استيراد نسخة",
     backupExported: "تم تصدير النسخة الاحتياطية.",
     backupFailed: "تعذر إنشاء النسخة الاحتياطية.",
-    backupImported: (n) => `تم استيراد ${n} تقرير.`,
+    backupImported: (s) => `تم استيراد ${s.reports} زيارة، ${s.monthly_schools} مدرسة، ${s.monthly_submissions} أرشيف صور شهرية.${s.skipped ? ` (تعذر قراءة ${s.skipped} سجل)` : ""}`,
     backupImportFailed: "تعذر استيراد الملف. تأكدي أنه نسخة احتياطية صحيحة.",
     editReportHeading: "تعديل بيانات التقرير",
     btnSaveChanges: "حفظ التعديلات",
@@ -153,6 +181,35 @@ const translations = {
     aiConfidenceLabel: (pct) => `مستوى ثقة AI: ${pct}%`,
     btnApproveAI: "✅ اعتماد وحفظ",
     spotLocationHeading: "موقع الملاحظة",
+    manualCategoryHeading: "التصنيف (اختياري)",
+    dashboardHeading: "لوحة التحكم",
+    statSchoolsLabel: "مدارس",
+    statVisitsLabel: "زيارات",
+    statObsLabel: "ملاحظات",
+    statMonthLabel: "هذا الشهر",
+    btnQuickStartVisit: "+ بدء زيارة",
+    btnQuickSchools: "🏫 المدارس",
+    btnOpenMonthlyShort: "📸 الصور الشهرية",
+    btnQuickReports: "📄 التقارير",
+    recentVisitsHeading: "آخر الزيارات",
+    noRecentVisits: "لا توجد زيارات بعد.",
+    allReportsHeading: "كل التقارير",
+    noReportsAtAll: "لا توجد أي زيارات بعد.",
+    schoolObsHistoryHeading: "الملاحظات السابقة",
+    noSchoolObs: "لا توجد ملاحظات سابقة.",
+    btnReuseNote: "♻️ استخدام كملاحظة جديدة",
+    noteReused: "تم نسخ الملاحظة — عدّلي التفاصيل وأضيفي صورة جديدة قبل الحفظ.",
+    searchObsResultsHeading: (n) => `نتائج البحث بالملاحظات (${n})`,
+    btnGeneratePptx: "🖥️ توليد PowerPoint",
+    pptxSummaryHeading: "ملخص قبل التوليد",
+    pptxSummarySchool: "المدرسة:",
+    pptxSummaryMonth: "الشهر:",
+    pptxSummaryPhotos: "الصور:",
+    pptxMissingList: (list) => `صور ناقصة (بيبقى مكان الصورة الأصلية بالقالب): ${list}`,
+    btnGeneratePptxConfirm: "توليد PowerPoint",
+    pptxGenerating: "⏳ جاري التوليد...",
+    pptxGenerated: "تم توليد ملف PowerPoint.",
+    pptxGenerateFailed: "تعذر توليد الملف. تأكدي من الاتصال بالإنترنت وحاولي مرة أخرى.",
     spotLocationPlaceholder: "مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني",
     needSpotLocation: "الرجاء كتابة موقع الملاحظة.",
     obsSpotLabel: "الموقع",
@@ -204,6 +261,8 @@ const translations = {
     settingInspector: "Inspector name",
     inspectorNamePlaceholder: "Inspector's name",
     pdfImageTypeHeading: "Image type in report",
+    footerTextHeading: "Footer text (bottom of every report page)",
+    footerTextPlaceholder: "إعداد: م. ص.س.م / ولاء الجابري",
     pdfImageDocumented: "Documented photo",
     pdfImageOriginal: "Original photo",
     btnSaveSettings: "Save Settings",
@@ -243,7 +302,7 @@ const translations = {
     btnImportBackup: "📂 Restore Backup",
     backupExported: "Backup exported.",
     backupFailed: "Couldn't create the backup.",
-    backupImported: (n) => `${n} report${n === 1 ? "" : "s"} imported.`,
+    backupImported: (s) => `Imported ${s.reports} visit${s.reports === 1 ? "" : "s"}, ${s.monthly_schools} school${s.monthly_schools === 1 ? "" : "s"}, ${s.monthly_submissions} monthly photo record${s.monthly_submissions === 1 ? "" : "s"}.${s.skipped ? ` (${s.skipped} record${s.skipped === 1 ? "" : "s"} couldn't be read)` : ""}`,
     backupImportFailed: "Couldn't import the file. Make sure it's a valid backup.",
     editReportHeading: "Edit Report Details",
     btnSaveChanges: "Save Changes",
@@ -298,6 +357,35 @@ const translations = {
     aiConfidenceLabel: (pct) => `AI confidence: ${pct}%`,
     btnApproveAI: "✅ Approve & Save",
     spotLocationHeading: "Observation Location",
+    manualCategoryHeading: "Category (optional)",
+    dashboardHeading: "Dashboard",
+    statSchoolsLabel: "Schools",
+    statVisitsLabel: "Visits",
+    statObsLabel: "Observations",
+    statMonthLabel: "This Month",
+    btnQuickStartVisit: "+ Start Visit",
+    btnQuickSchools: "🏫 Schools",
+    btnOpenMonthlyShort: "📸 Monthly Photos",
+    btnQuickReports: "📄 Reports",
+    recentVisitsHeading: "Recent Visits",
+    noRecentVisits: "No visits yet.",
+    allReportsHeading: "All Reports",
+    noReportsAtAll: "No visits yet.",
+    schoolObsHistoryHeading: "Previous Observations",
+    noSchoolObs: "No previous observations.",
+    btnReuseNote: "♻️ Use as New Note",
+    noteReused: "Note copied — edit the details and add a new photo before saving.",
+    searchObsResultsHeading: (n) => `Matching observations (${n})`,
+    btnGeneratePptx: "🖥️ Generate PowerPoint",
+    pptxSummaryHeading: "Summary Before Generating",
+    pptxSummarySchool: "School:",
+    pptxSummaryMonth: "Month:",
+    pptxSummaryPhotos: "Photos:",
+    pptxMissingList: (list) => `Missing photos (original template photo stays in that spot): ${list}`,
+    btnGeneratePptxConfirm: "Generate PowerPoint",
+    pptxGenerating: "⏳ Generating...",
+    pptxGenerated: "PowerPoint file generated.",
+    pptxGenerateFailed: "Couldn't generate the file. Check your connection and try again.",
     spotLocationPlaceholder: "e.g. Classroom 3B - next to the whiteboard, or Teachers' Room - 2nd floor",
     needSpotLocation: "Please enter the observation location.",
     obsSpotLabel: "Location",
@@ -317,6 +405,7 @@ async function applyLanguage(lang) {
   currentLang = lang;
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+  populateCategorySelects();
 
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     const key = el.getAttribute("data-i18n");
@@ -367,9 +456,11 @@ const screenBackButtonMap = {
   "screen-monthly-home": "monthlyBackHomeBtn",
   "screen-monthly-template": "cancelSlotsBtn",
   "screen-monthly-school": "monthlySchoolBackBtn",
+  "screen-pptx-summary": "pptxSummaryBackBtn",
   "screen-school-detail": "schoolDetailBackBtn",
   "screen-unlinked-visits": "unlinkedVisitsBackBtn",
-  "screen-ai-review": "aiCancelBtn"
+  "screen-ai-review": "aiCancelBtn",
+  "screen-all-reports": "allReportsBackBtn"
 };
 
 function showScreen(id) {
@@ -398,11 +489,75 @@ function normalizeName(str) {
 async function renderHome() {
   cachedSchools = await getAllMonthlySchools();
   cachedAllReports = await getAllReports();
+  renderDashboardStats();
+  renderRecentVisits();
   renderSchoolsHomeList();
 }
 
+function resolveSchoolNameForReport(report) {
+  if (report.schoolId) {
+    const school = cachedSchools.find((s) => s.id === report.schoolId);
+    if (school) return school.name;
+  }
+  return report.location || "";
+}
+
+function renderDashboardStats() {
+  const totalObs = cachedAllReports.reduce((sum, r) => sum + r.observations.length, 0);
+  const monthPrefix = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+  const thisMonthCount = cachedAllReports.filter((r) => (r.date || "").startsWith(monthPrefix)).length;
+
+  document.getElementById("statSchools").textContent = cachedSchools.length;
+  document.getElementById("statVisits").textContent = cachedAllReports.length;
+  document.getElementById("statObservations").textContent = totalObs;
+  document.getElementById("statThisMonth").textContent = thisMonthCount;
+}
+
+function renderRecentVisits() {
+  const listEl = document.getElementById("recentVisitsList");
+  const emptyEl = document.getElementById("noRecentVisitsMsg");
+  listEl.innerHTML = "";
+
+  const recent = cachedAllReports
+    .slice()
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+    .slice(0, 5);
+
+  if (recent.length === 0) {
+    emptyEl.style.display = "block";
+    return;
+  }
+  emptyEl.style.display = "none";
+
+  recent.forEach((report) => {
+    const card = document.createElement("div");
+    card.className = "recent-visit-card";
+    card.innerHTML = `
+      <div class="rv-info">
+        <h4>${escapeHtml(resolveSchoolNameForReport(report))}</h4>
+        <p>${escapeHtml(report.date)} · ${t("obsCount")(report.observations.length)}</p>
+      </div>
+      <button class="rv-open" data-id="${report.id}">${t("openBtn")}</button>
+    `;
+    listEl.appendChild(card);
+  });
+  listEl.querySelectorAll(".rv-open").forEach((btn) => {
+    btn.addEventListener("click", () => openReport(btn.dataset.id));
+  });
+}
+
+// A visit is considered to belong to a school if either its schoolId
+// matches (new, reliable way — set automatically since this phase),
+// or — for older visits saved before schoolId existed — its location
+// text matches the school's name (the original matching rule, kept
+// for backward compatibility so no old visit ever "disappears").
+function visitBelongsToSchool(report, school) {
+  if (report.schoolId) return report.schoolId === school.id;
+  return normalizeName(report.location) === normalizeName(school.name);
+}
+
 function schoolStats(school) {
-  const visits = cachedAllReports.filter((r) => normalizeName(r.location) === normalizeName(school.name));
+  const visits = cachedAllReports.filter((r) => visitBelongsToSchool(r, school));
   const obsCount = visits.reduce((sum, v) => sum + v.observations.length, 0);
   const lastVisit = visits.reduce((max, v) => (!max || v.date > max ? v.date : max), null);
   return { visits, visitCount: visits.length, obsCount, lastVisit };
@@ -423,7 +578,6 @@ function renderSchoolsHomeList() {
     emptyEl.textContent = query ? t("noSearchResults") : t("noSchoolsHome");
   } else {
     emptyEl.style.display = "none";
-    const knownNames = new Set(cachedSchools.map((s) => normalizeName(s.name)));
 
     schools.forEach((school) => {
       const stats = schoolStats(school);
@@ -453,8 +607,8 @@ function renderSchoolsHomeList() {
       });
     });
 
-    // Unlinked visits button: reports whose location doesn't match any saved school
-    const unlinkedCount = cachedAllReports.filter((r) => !knownNames.has(normalizeName(r.location))).length;
+    // Unlinked visits button: reports that don't belong to any saved school
+    const unlinkedCount = cachedAllReports.filter((r) => !cachedSchools.some((s) => visitBelongsToSchool(r, s))).length;
     const unlinkedBtn = document.getElementById("viewUnlinkedBtn");
     if (unlinkedCount > 0) {
       unlinkedBtn.style.display = "block";
@@ -463,6 +617,52 @@ function renderSchoolsHomeList() {
       unlinkedBtn.style.display = "none";
     }
   }
+
+  renderSearchObservationResults(query);
+}
+
+// Extends search beyond school names: also surfaces matching
+// observations (text or location) across every visit, shown below the
+// schools list only when there's something to show — keeps the default
+// (empty search) dashboard exactly as before.
+function renderSearchObservationResults(query) {
+  let container = document.getElementById("searchObsResults");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "searchObsResults";
+    document.getElementById("schoolsHomeList").insertAdjacentElement("afterend", container);
+  }
+  container.innerHTML = "";
+  if (!query) return;
+
+  const matches = [];
+  cachedAllReports.forEach((report) => {
+    report.observations.forEach((obs) => {
+      const haystack = `${obs.text || ""} ${obs.spotLocation || ""}`.toLowerCase();
+      if (haystack.includes(query)) matches.push({ report, obs });
+    });
+  });
+  if (matches.length === 0) return;
+
+  const heading = document.createElement("h3");
+  heading.className = "section-heading";
+  heading.textContent = t("searchObsResultsHeading")(matches.length);
+  container.appendChild(heading);
+
+  matches.slice(0, 10).forEach(({ report, obs }) => {
+    const card = document.createElement("div");
+    card.className = "obs-card";
+    card.innerHTML = `
+      <p class="muted">${escapeHtml(resolveSchoolNameForReport(report))} · ${escapeHtml(report.date)}</p>
+      ${obs.spotLocation ? `<p class="obs-spot">📍 ${escapeHtml(obs.spotLocation)}</p>` : ""}
+      <p class="obs-text">${escapeHtml(obs.text)}</p>
+      <div class="card-actions">
+        <button class="card-open">${t("openBtn")}</button>
+      </div>
+    `;
+    card.querySelector("button").addEventListener("click", () => openReport(report.id));
+    container.appendChild(card);
+  });
 }
 
 document.getElementById("addSchoolBtnHome").addEventListener("click", async () => {
@@ -472,12 +672,53 @@ document.getElementById("addSchoolBtnHome").addEventListener("click", async () =
     showToast(t("needSchoolName"));
     return;
   }
-  await addMonthlySchool(name);
+  const newSchool = await addMonthlySchool(name);
   input.value = "";
   await renderHome();
 });
 
 document.getElementById("searchInput").addEventListener("input", renderSchoolsHomeList);
+
+// ---------- Dashboard quick actions ----------
+function scrollToSchoolsSection() {
+  document.getElementById("schoolsSectionHeading").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.getElementById("searchInput").focus();
+}
+document.getElementById("quickStartVisitBtn").addEventListener("click", scrollToSchoolsSection);
+document.getElementById("quickSchoolsBtn").addEventListener("click", scrollToSchoolsSection);
+
+document.getElementById("quickReportsBtn").addEventListener("click", () => {
+  const listEl = document.getElementById("allReportsList");
+  const emptyEl = document.getElementById("noAllReportsMsg");
+  listEl.innerHTML = "";
+
+  const sorted = cachedAllReports.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  if (sorted.length === 0) {
+    emptyEl.style.display = "block";
+  } else {
+    emptyEl.style.display = "none";
+    sorted.forEach((report) => {
+      const card = document.createElement("div");
+      card.className = "report-card";
+      card.innerHTML = `
+        <h4>${escapeHtml(report.title)}</h4>
+        <p class="muted">${escapeHtml(resolveSchoolNameForReport(report))} — ${escapeHtml(report.date)} · ${t("obsCount")(report.observations.length)}</p>
+        <div class="card-actions">
+          <button class="card-open ar-open" data-id="${report.id}">${t("openBtn")}</button>
+        </div>
+      `;
+      listEl.appendChild(card);
+    });
+    listEl.querySelectorAll(".ar-open").forEach((btn) => {
+      btn.addEventListener("click", () => openReport(btn.dataset.id));
+    });
+  }
+  showScreen("screen-all-reports");
+});
+
+document.getElementById("allReportsBackBtn").addEventListener("click", () => {
+  showScreen("screen-home");
+});
 
 // ---------- School Detail ----------
 async function openSchoolDetail(schoolId) {
@@ -490,6 +731,18 @@ async function openSchoolDetail(schoolId) {
   document.getElementById("schoolDetailStats").textContent =
     `${t("visitsCount")(stats.visitCount)} · ${t("obsCount")(stats.obsCount)}` +
     (stats.lastVisit ? ` · ${t("lastVisitLabel")} ${stats.lastVisit}` : "");
+
+  // Monthly photo status for the current month
+  try {
+    const slots = await getMonthlySlots();
+    const monthKey = new Date().toISOString().slice(0, 7);
+    const submission = await getMonthlySubmission(school.id, monthKey);
+    const done = Object.keys(submission.photos || {}).length;
+    document.getElementById("schoolMonthlyStatus").textContent =
+      "📅 " + t("monthlyProgress")(done, slots.length);
+  } catch (e) {
+    document.getElementById("schoolMonthlyStatus").textContent = "";
+  }
 
   const listEl = document.getElementById("schoolVisitsList");
   const emptyEl = document.getElementById("noSchoolVisitsMsg");
@@ -529,7 +782,70 @@ async function openSchoolDetail(schoolId) {
     });
   }
 
+  // Flattened observation history across all this school's visits
+  const obsHistoryList = document.getElementById("schoolObsHistoryList");
+  const obsHistoryEmpty = document.getElementById("noSchoolObsMsg");
+  obsHistoryList.innerHTML = "";
+
+  const allObs = [];
+  stats.visits.forEach((visit) => {
+    visit.observations.forEach((obs) => allObs.push({ obs, date: visit.date }));
+  });
+  allObs.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+  if (allObs.length === 0) {
+    obsHistoryEmpty.style.display = "block";
+  } else {
+    obsHistoryEmpty.style.display = "none";
+    allObs.forEach(({ obs, date }, i) => {
+      const photos = obsPhotos(obs);
+      const thumbHtml = photos.length ? `<img src="${URL.createObjectURL(photos[0].blob)}" class="obs-thumb" alt="">` : "";
+      const card = document.createElement("div");
+      card.className = "obs-card";
+      card.innerHTML = `
+        <p class="muted">${escapeHtml(date)}${obs.category ? " · " + escapeHtml(obs.category) : ""}</p>
+        ${obs.spotLocation ? `<p class="obs-spot">📍 ${escapeHtml(obs.spotLocation)}</p>` : ""}
+        ${thumbHtml}
+        <p class="obs-text">${escapeHtml(obs.text)}</p>
+        ${obs.recommendedAction ? `<p class="obs-action"><strong>${t("aiActionLabel")}:</strong> ${escapeHtml(obs.recommendedAction)}</p>` : ""}
+        <div class="card-actions">
+          <button class="card-open obs-reuse" data-i="${i}">${t("btnReuseNote")}</button>
+        </div>
+      `;
+      obsHistoryList.appendChild(card);
+    });
+    obsHistoryList.querySelectorAll(".obs-reuse").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const entry = allObs[parseInt(btn.dataset.i, 10)];
+        reuseObservationForSchool(entry.obs);
+      });
+    });
+  }
+
   showScreen("screen-school-detail");
+}
+
+async function reuseObservationForSchool(obsData) {
+  if (!activeSchoolForVisits) return;
+  const today = new Date().toISOString().split("T")[0];
+  const report = {
+    id: generateId(),
+    title: `${t("visitDefaultTitlePrefix")} ${today}`,
+    schoolId: activeSchoolForVisits.id,
+    location: activeSchoolForVisits.name,
+    date: today,
+    observations: [],
+    photoSettings: defaultPhotoSettings(),
+    createdAt: Date.now()
+  };
+  await saveReport(report);
+  activeReport = report;
+  openObservationEditor(null);
+  document.getElementById("observationText").value = obsData.text || "";
+  document.getElementById("observationSpotLocation").value = obsData.spotLocation || "";
+  document.getElementById("observationCategorySelect").value = obsData.category || "";
+  editingAIFields = obsData.recommendedAction ? { recommendedAction: obsData.recommendedAction } : {};
+  showToast(t("noteReused"));
 }
 
 let activeSchoolForVisits = null;
@@ -540,6 +856,7 @@ document.getElementById("startVisitBtn").addEventListener("click", async () => {
   const report = {
     id: generateId(),
     title: `${t("visitDefaultTitlePrefix")} ${today}`,
+    schoolId: activeSchoolForVisits.id,
     location: activeSchoolForVisits.name,
     date: today,
     observations: [],
@@ -552,8 +869,7 @@ document.getElementById("startVisitBtn").addEventListener("click", async () => {
 
 // ---------- Unlinked visits ----------
 document.getElementById("viewUnlinkedBtn").addEventListener("click", () => {
-  const knownNames = new Set(cachedSchools.map((s) => normalizeName(s.name)));
-  const unlinked = cachedAllReports.filter((r) => !knownNames.has(normalizeName(r.location)));
+  const unlinked = cachedAllReports.filter((r) => !cachedSchools.some((s) => visitBelongsToSchool(r, s)));
 
   const listEl = document.getElementById("unlinkedVisitsList");
   listEl.innerHTML = "";
@@ -627,8 +943,8 @@ document.getElementById("importBackupInput").addEventListener("change", async (e
   e.target.value = "";
   if (!file) return;
   try {
-    const count = await importBackupFile(file);
-    showToast(t("backupImported")(count));
+    const summary = await importBackupFile(file);
+    showToast(t("backupImported")(summary));
     renderHome();
   } catch (err) {
     console.error(err);
@@ -811,6 +1127,7 @@ function resetObservationForm() {
   document.getElementById("recordingStatus").style.display = "none";
   document.getElementById("observationText").value = "";
   document.getElementById("observationSpotLocation").value = "";
+  document.getElementById("observationCategorySelect").value = "";
   document.getElementById("recordBtn").textContent = t("btnRecord");
   document.getElementById("cameraInput").value = "";
   document.getElementById("galleryInput").value = "";
@@ -829,6 +1146,7 @@ function openObservationEditor(index) {
     const obs = activeReport.observations[index];
     document.getElementById("observationText").value = obs.text || "";
     document.getElementById("observationSpotLocation").value = obs.spotLocation || "";
+    document.getElementById("observationCategorySelect").value = obs.category || "";
     stagedPhotos = [...obsPhotos(obs)];
     renderPhotosGrid();
     if (obs.audioBlob) {
@@ -1099,12 +1417,15 @@ async function saveCurrentObservation(extraFields) {
     return false;
   }
 
+  const manualCategory = document.getElementById("observationCategorySelect").value;
+
   const obs = {
     text,
     spotLocation,
     photos: stagedPhotos,
     audioBlob: stagedAudioBlob || null,
     ...editingAIFields,
+    category: manualCategory || editingAIFields.category || undefined,
     ...(extraFields || {})
   };
 
@@ -1399,6 +1720,7 @@ document.getElementById("photoSettingsBtn").addEventListener("click", () => {
   document.getElementById("inspectorNameInput").value = s.inspectorName || "";
   document.getElementById("pdfImageDocumented").checked = s.pdfImageType !== "original";
   document.getElementById("pdfImageOriginal").checked = s.pdfImageType === "original";
+  document.getElementById("footerTextInput").value = s.footerText || defaultPhotoSettings().footerText;
   showScreen("screen-photo-settings");
 });
 
@@ -1413,7 +1735,8 @@ document.getElementById("savePhotoSettingsBtn").addEventListener("click", async 
     showTime: document.getElementById("settingTime").checked,
     showInspector: document.getElementById("settingInspector").checked,
     inspectorName: document.getElementById("inspectorNameInput").value.trim(),
-    pdfImageType: document.getElementById("pdfImageOriginal").checked ? "original" : "documented"
+    pdfImageType: document.getElementById("pdfImageOriginal").checked ? "original" : "documented",
+    footerText: document.getElementById("footerTextInput").value.trim() || defaultPhotoSettings().footerText
   };
   await saveReport(activeReport);
   showToast(currentLang === "ar" ? "تم حفظ الإعدادات." : "Settings saved.");

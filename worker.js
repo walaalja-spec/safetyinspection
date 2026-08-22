@@ -12,12 +12,22 @@
 //     Type:  Secret
 // ---------------------------------------------------------------------
 
+// Mirrors OBSERVATION_CATEGORIES in app.js — keep these two lists in
+// sync manually if categories ever change (they intentionally live in
+// two different runtimes: Worker vs. browser).
+const ALLOWED_CATEGORIES = [
+  "كهرباء", "كهرباء وإنارة", "سباكة", "دورات مياه", "تكييف وتبريد",
+  "حريق", "السلامة", "مخارج طوارئ", "سلامة المبنى", "الأرضيات",
+  "الأبواب والنوافذ", "أسقف وجدران", "النظافة", "المواد الكيميائية",
+  "معدات السلامة", "الإسعافات الأولية", "التمديدات", "المخاطر العامة", "أخرى"
+];
+
 const SYSTEM_PROMPT = `أنت مساعد يحلل ملاحظات تفتيش الصحة والسلامة المهنية في المدارس.
 
 مهمتك: تحويل نص مسموع (وصورة اختيارية) إلى ملاحظة منظمة، دون تغيير المعنى الأصلي الذي ذكره المستخدم.
 
-التصنيفات المتاحة (اختر الأنسب):
-كهرباء، حريق، مخارج طوارئ، سلامة المبنى، الأرضيات، الأبواب والنوافذ، النظافة، المواد الكيميائية، معدات السلامة، الإسعافات الأولية، التمديدات، المخاطر العامة، أخرى
+التصنيفات المتاحة (اختر الأنسب، ولا تخترع تصنيفًا غير موجود بهذي القائمة):
+كهرباء، كهرباء وإنارة، سباكة، دورات مياه، تكييف وتبريد، حريق، السلامة، مخارج طوارئ، سلامة المبنى، الأرضيات، الأبواب والنوافذ، أسقف وجدران، النظافة، المواد الكيميائية، معدات السلامة، الإسعافات الأولية، التمديدات، المخاطر العامة، أخرى
 
 قواعد صارمة:
 1. لا تخترع تفاصيل غير مذكورة في النص أو غير ظاهرة بوضوح في الصورة.
@@ -144,8 +154,12 @@ async function handleAnalyze(request, env) {
     }
   }
 
+  // Never let the AI introduce a category outside the fixed list —
+  // fall back to "أخرى" (Other) if it ever returns something unexpected.
+  const safeCategory = ALLOWED_CATEGORIES.includes(parsed.category) ? parsed.category : "أخرى";
+
   return jsonResponse({
-    category: parsed.category,
+    category: safeCategory,
     description: parsed.description,
     recommendedAction: parsed.recommendedAction,
     visualObservation: parsed.visualObservation || "",

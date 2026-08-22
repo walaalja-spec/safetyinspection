@@ -286,3 +286,51 @@ document.getElementById("monthlySchoolBackBtn").addEventListener("click", async 
   await renderMonthlySchoolsList();
   showScreen("screen-monthly-home");
 });
+
+// ---------- PowerPoint generation (Phase: monthly photos → PPTX) ----------
+document.getElementById("openPptxSummaryBtn").addEventListener("click", () => {
+  const completeness = computePptxCompleteness(monthlySlots, activeSubmission);
+
+  document.getElementById("pptxSummarySchoolName").textContent = activeSchool.name;
+  document.getElementById("pptxSummaryMonth").textContent = currentMonthKey;
+  document.getElementById("pptxSummaryPhotos").textContent =
+    `${completeness.done} / ${completeness.total}` + (currentLang === "ar" ? " مكتملة" : " complete");
+
+  const missingNote = document.getElementById("pptxMissingNote");
+  if (completeness.missingLabels.length > 0) {
+    missingNote.style.display = "block";
+    missingNote.textContent = t("pptxMissingList")(completeness.missingLabels.join("، "));
+  } else {
+    missingNote.style.display = "none";
+  }
+
+  showScreen("screen-pptx-summary");
+});
+
+document.getElementById("pptxSummaryBackBtn").addEventListener("click", () => {
+  showScreen("screen-monthly-school");
+});
+
+document.getElementById("generatePptxBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("generatePptxBtn");
+  const msg = document.getElementById("pptxGeneratingMsg");
+  btn.disabled = true;
+  msg.style.display = "block";
+  try {
+    const { blob, fileName } = await generateMonthlyPptx(activeSchool, currentMonthKey);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast(t("pptxGenerated"));
+  } catch (err) {
+    console.error("PPTX generation failed:", err);
+    showToast(t("pptxGenerateFailed"));
+  } finally {
+    btn.disabled = false;
+    msg.style.display = "none";
+  }
+});

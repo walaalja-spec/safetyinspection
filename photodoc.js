@@ -21,7 +21,8 @@ function defaultPhotoSettings() {
     showTime: false,
     showInspector: false,
     inspectorName: "",
-    pdfImageType: "documented" // "documented" | "original"
+    pdfImageType: "documented", // "documented" | "original"
+    footerText: "إعداد: م. ص.س.م / ولاء الجابري"
   };
 }
 

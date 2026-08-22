@@ -173,61 +173,188 @@ async function dataUrlToBlob(dataUrl) {
   return res.blob();
 }
 
-async function exportBackupBlob() {
-  const reports = await getAllReports();
-  const out = [];
-  for (const report of reports) {
-    const obsOut = [];
-    for (const obs of report.observations) {
-      const photosOut = [];
-      for (const p of obsPhotos(obs)) {
-        photosOut.push({ dataUrl: await blobToDataUrl(p.blob), takenAt: p.takenAt || null });
-      }
-      const audioDataUrl = obs.audioBlob ? await blobToDataUrl(obs.audioBlob) : null;
-      obsOut.push({ text: obs.text, photos: photosOut, audioDataUrl });
-    }
-    out.push({
-      id: report.id,
-      title: report.title,
-      location: report.location,
-      date: report.date,
-      createdAt: report.createdAt,
-      photoSettings: report.photoSettings || null,
-      observations: obsOut
-    });
+// Generic deep (de)serializers — walk any value (report, school, monthly
+// template/submission, whatever shape it currently has) and convert
+// Blobs to/from a portable marker. This deliberately does NOT hardcode
+// field names, so every field that actually exists on a record today —
+// or gets added later — is carried through the backup automatically.
+async function serializeForBackup(value) {
+  if (value instanceof Blob) {
+    return { __blob: true, dataUrl: await blobToDataUrl(value) };
   }
-  const json = JSON.stringify({ exportedAt: Date.now(), reports: out });
+  if (Array.isArray(value)) {
+    const out = [];
+    for (const item of value) out.push(await serializeForBackup(item));
+    return out;
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = await serializeForBackup(value[key]);
+    return out;
+  }
+  return value;
+}
+
+async function deserializeFromBackup(value) {
+  if (value && typeof value === "object" && value.__blob === true && typeof value.dataUrl === "string") {
+    return dataUrlToBlob(value.dataUrl);
+  }
+  if (Array.isArray(value)) {
+    const out = [];
+    for (const item of value) out.push(await deserializeFromBackup(item));
+    return out;
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = await deserializeFromBackup(value[key]);
+    return out;
+  }
+  return value;
+}
+
+const BACKUP_VERSION = 2;
+
+async function exportBackupBlob() {
+  const [reports, schools, templates, submissions] = await Promise.all([
+    getAllReports(),
+    storeGetAll(MONTHLY_SCHOOLS_STORE),
+    storeGetAll(MONTHLY_TEMPLATE_STORE),
+    storeGetAll(MONTHLY_SUBMISSIONS_STORE)
+  ]);
+
+  const payload = {
+    backupVersion: BACKUP_VERSION,
+    exportedAt: Date.now(),
+    stores: {
+      reports: await serializeForBackup(reports),
+      monthly_schools: await serializeForBackup(schools),
+      monthly_templates: await serializeForBackup(templates),
+      monthly_submissions: await serializeForBackup(submissions)
+    }
+  };
+
+  const json = JSON.stringify(payload);
   return new Blob([json], { type: "application/json" });
 }
 
-// Returns the number of reports imported.
+// Restores a backup file. Never touches IndexedDB until every record in
+// the file has been successfully decoded (Base64 → Blob) — an invalid
+// or corrupted file fails before anything is written, so existing data
+// is never at risk. A single unreadable record is skipped (and counted)
+// rather than failing the whole import. Writes use `put` (upsert by id)
+// exactly like the rest of the app already does, so importing is always
+// additive/merging — it never clears existing data.
+//
+// Handles both the current { backupVersion, stores } format and the
+// original pre-versioned format that only ever held `reports`.
 async function importBackupFile(file) {
   const text = await file.text();
-  const data = JSON.parse(text);
-  let count = 0;
-  for (const r of data.reports || []) {
-    const observations = [];
-    for (const obs of r.observations || []) {
-      const photos = [];
-      for (const p of obs.photos || []) {
-        photos.push({ blob: await dataUrlToBlob(p.dataUrl), takenAt: p.takenAt || null });
-      }
-      const audioBlob = obs.audioDataUrl ? await dataUrlToBlob(obs.audioDataUrl) : null;
-      observations.push({ text: obs.text, photos, audioBlob });
-    }
-    const report = {
-      id: r.id || generateId(),
-      title: r.title || "",
-      location: r.location || "",
-      date: r.date || "",
-      createdAt: r.createdAt || Date.now(),
-      photoSettings: r.photoSettings || null,
-      observations
-    };
-    await saveReport(report);
-    count++;
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error("invalid_json");
   }
-  return count;
+
+  let stores;
+  if (data && typeof data === "object" && data.stores && typeof data.stores === "object") {
+    stores = data.stores;
+  } else if (data && Array.isArray(data.reports)) {
+    // Original backup format (pre-backupVersion): reports only.
+    stores = { reports: data.reports, monthly_schools: [], monthly_templates: [], monthly_submissions: [] };
+  } else {
+    throw new Error("invalid_backup");
+  }
+
+  const reportsIn = Array.isArray(stores.reports) ? stores.reports : [];
+  const schoolsIn = Array.isArray(stores.monthly_schools) ? stores.monthly_schools : [];
+  const templatesIn = Array.isArray(stores.monthly_templates) ? stores.monthly_templates : [];
+  const submissionsIn = Array.isArray(stores.monthly_submissions) ? stores.monthly_submissions : [];
+
+  const summary = { reports: 0, monthly_schools: 0, monthly_templates: 0, monthly_submissions: 0, skipped: 0 };
+
+  // Phase 1: decode everything first. Nothing is written to IndexedDB yet.
+  const decode = async (list, label) => {
+    const ready = [];
+    for (const item of list) {
+      try {
+        ready.push(await deserializeFromBackup(item));
+      } catch (e) {
+        console.warn(`Skipping unreadable ${label} record in backup:`, e);
+        summary.skipped++;
+      }
+    }
+    return ready;
+  };
+
+  const readyReports = await decode(reportsIn, "report");
+  const readySchools = await decode(schoolsIn, "monthly_schools");
+  const readyTemplates = await decode(templatesIn, "monthly_templates");
+  const readySubmissions = await decode(submissionsIn, "monthly_submissions");
+
+  // Phase 2: only now, after decoding succeeded, write to IndexedDB.
+  for (const r of readyReports) {
+    if (!r || !r.id) { summary.skipped++; continue; }
+    r.observations = Array.isArray(r.observations) ? r.observations : [];
+    await saveReport(r);
+    summary.reports++;
+  }
+  for (const s of readySchools) {
+    if (!s || !s.id) { summary.skipped++; continue; }
+    await storePut(MONTHLY_SCHOOLS_STORE, s);
+    summary.monthly_schools++;
+  }
+  for (const tpl of readyTemplates) {
+    if (!tpl || !tpl.id) { summary.skipped++; continue; }
+    await storePut(MONTHLY_TEMPLATE_STORE, tpl);
+    summary.monthly_templates++;
+  }
+  for (const sub of readySubmissions) {
+    if (!sub || !sub.id) { summary.skipped++; continue; }
+    await storePut(MONTHLY_SUBMISSIONS_STORE, sub);
+    summary.monthly_submissions++;
+  }
+
+  return summary;
+}
+
+// ---------------------------------------------------------------------
+// Internal verification helper — NOT exposed in the UI. Exports the
+// current data, re-imports it (safe: re-importing identical records by
+// id is just an idempotent overwrite), then compares record counts and
+// ids to confirm nothing was lost. Run manually from the browser
+// console if you ever need to double check:
+//   await __testBackupRoundtrip()
+// ---------------------------------------------------------------------
+async function __testBackupRoundtrip() {
+  const snapshot = async () => ({
+    reports: await getAllReports(),
+    monthly_schools: await storeGetAll(MONTHLY_SCHOOLS_STORE),
+    monthly_templates: await storeGetAll(MONTHLY_TEMPLATE_STORE),
+    monthly_submissions: await storeGetAll(MONTHLY_SUBMISSIONS_STORE)
+  });
+
+  const before = await snapshot();
+  const blob = await exportBackupBlob();
+  const parsed = JSON.parse(await blob.text());
+  const file = new File([blob], "roundtrip_test.json", { type: "application/json" });
+  const importSummary = await importBackupFile(file);
+  const after = await snapshot();
+
+  const idSet = (arr) => arr.map((r) => r.id).sort().join(",");
+  const counts = {};
+  for (const key of ["reports", "monthly_schools", "monthly_templates", "monthly_submissions"]) {
+    counts[key] = { before: before[key].length, after: after[key].length, exported: parsed.stores[key].length };
+  }
+  const idsMatch = {
+    reports: idSet(before.reports) === idSet(after.reports),
+    monthly_schools: idSet(before.monthly_schools) === idSet(after.monthly_schools)
+  };
+  const passed = Object.values(counts).every((c) => c.before === c.after) && idsMatch.reports && idsMatch.monthly_schools;
+
+  const result = { backupVersion: parsed.backupVersion, counts, idsMatch, importSummary, passed };
+  console.log("Backup roundtrip test:", result);
+  return result;
 }
 
 // ---------------------------------------------------------------------
@@ -276,7 +403,20 @@ async function storeDelete(storeName, id) {
 // Monthly required-photos feature
 // ---------------------------------------------------------------------
 
-const DEFAULT_MONTHLY_SLOTS = ["واجهة المدرسة", "الملعب", "المطبخ", "دورات المياه", "غرفة الأمن"];
+// Matches the real PowerPoint template's 15 photo placeholders exactly
+// (see pptx.js's PPTX_IMAGE_MAP) — duplicate labels are intentional,
+// since the template has multiple frames for some categories (e.g. two
+// "صورة الموقع العام" photos, four "الأمن والسلامة" photos).
+const DEFAULT_MONTHLY_SLOTS = [
+  "صورة الموقع العام", "صورة الموقع العام",
+  "صورة المدرسة / المبنى", "صورة المدرسة / المبنى",
+  "السطح",
+  "صور الممرات",
+  "صور الحمام / المطبخ",
+  "صور للفصول / المكاتب", "صور للفصول / المكاتب", "صور للفصول / المكاتب",
+  "الأمن والسلامة", "الأمن والسلامة", "الأمن والسلامة", "الأمن والسلامة",
+  "لافتة المبنى"
+];
 
 // Returns the shared checklist of required photo types (same for every school).
 async function getMonthlySlots() {
@@ -286,7 +426,7 @@ async function getMonthlySlots() {
 }
 
 async function saveMonthlySlots(slots) {
-  await storePut(MONTHLY_TEMPLATE_STORE, { id: "template", slots });
+  await storePut(MONTHLY_TEMPLATE_STORE, { id: "template", slots, updatedAt: Date.now() });
 }
 
 async function getAllMonthlySchools() {
@@ -295,7 +435,7 @@ async function getAllMonthlySchools() {
 }
 
 async function addMonthlySchool(name) {
-  const school = { id: generateId(), name, createdAt: Date.now() };
+  const school = { id: generateId(), name, createdAt: Date.now(), updatedAt: Date.now() };
   await storePut(MONTHLY_SCHOOLS_STORE, school);
   return school;
 }

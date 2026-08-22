@@ -221,6 +221,28 @@ input:focus, textarea:focus, button:focus-visible {
 .add-school-row input { flex: 1; }
 .add-school-row .btn { width: 50px; margin-top: 0; padding: 0; font-size: 1.3rem; }
 
+/* ---------- Dashboard ---------- */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.stat-card {
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius);
+  padding: 10px 4px; text-align: center; box-shadow: var(--shadow-sm);
+}
+.stat-value { font-size: 1.3rem; font-weight: 800; color: var(--color-primary); line-height: 1.2; }
+.stat-label { font-size: 0.7rem; color: var(--color-muted); margin-top: 2px; }
+
+.quick-actions-row { display: flex; gap: 8px; margin: 10px 0 20px 0; }
+.quick-actions-row .btn { margin-top: 0; padding: 12px 6px; font-size: 0.82rem; }
+
+.recent-visit-card {
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; box-shadow: var(--shadow-sm);
+}
+.recent-visit-card .rv-info h4 { font-size: 0.95rem; margin-bottom: 2px; }
+.recent-visit-card .rv-info p { font-size: 0.8rem; color: var(--color-muted); margin: 0; }
+.recent-visit-card button { flex-shrink: 0; padding: 8px 16px; border-radius: 8px; border: none; background: var(--color-primary); color: #fff; font-weight: 700; font-size: 0.85rem; }
+.monthly-status-line { font-size: 0.85rem; color: var(--color-muted); margin: 2px 0 14px 0; }
+
 .monthly-school-card {
   background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius);
   padding: 14px; margin-bottom: 12px; box-shadow: var(--shadow-sm);
@@ -256,6 +278,12 @@ input:focus, textarea:focus, button:focus-visible {
 .monthly-slot-actions { display: flex; gap: 6px; }
 .monthly-slot-actions button { flex: 1; padding: 8px; font-size: 0.9rem; border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); transition: transform 0.08s ease; }
 .monthly-slot-actions button:active { transform: scale(0.94); background: var(--color-primary-light); }
+
+.pptx-summary-card {
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius);
+  padding: 16px; margin-bottom: 14px; box-shadow: var(--shadow-sm);
+}
+.pptx-summary-card p { margin: 8px 0; font-size: 0.95rem; }
 
 /* ---------- Photo documentation settings screen ---------- */
 .toggle-row {

@@ -4,18 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>ملاحظاتي</title>
-<link rel="manifest" href="manifest.json?v=12">
+<link rel="manifest" href="manifest.json?v=16">
 <meta name="theme-color" content="#1f5e3d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ملاحظاتي">
-<link rel="apple-touch-icon" href="icon.png?v=12">
-<link rel="icon" href="icon.png?v=12">
+<link rel="apple-touch-icon" href="icon.png?v=16">
+<link rel="icon" href="icon.png?v=16">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 
@@ -27,9 +27,29 @@
 
   <main id="app">
 
-    <!-- SCREEN: Home -->
+    <!-- SCREEN: Home (Dashboard) -->
     <section id="screen-home" class="screen active">
-      <h2 data-i18n="schoolsHeading">مدارسي</h2>
+      <h2 data-i18n="dashboardHeading">لوحة التحكم</h2>
+
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value" id="statSchools">0</div><div class="stat-label" data-i18n="statSchoolsLabel">مدارس</div></div>
+        <div class="stat-card"><div class="stat-value" id="statVisits">0</div><div class="stat-label" data-i18n="statVisitsLabel">زيارات</div></div>
+        <div class="stat-card"><div class="stat-value" id="statObservations">0</div><div class="stat-label" data-i18n="statObsLabel">ملاحظات</div></div>
+        <div class="stat-card"><div class="stat-value" id="statThisMonth">0</div><div class="stat-label" data-i18n="statMonthLabel">هذا الشهر</div></div>
+      </div>
+
+      <button id="quickStartVisitBtn" class="btn btn-primary btn-large" data-i18n="btnQuickStartVisit">+ بدء زيارة</button>
+      <div class="quick-actions-row">
+        <button id="quickSchoolsBtn" class="btn btn-secondary" data-i18n="btnQuickSchools">🏫 المدارس</button>
+        <button id="openMonthlyBtn" class="btn btn-secondary" data-i18n="btnOpenMonthlyShort">📸 الصور الشهرية</button>
+        <button id="quickReportsBtn" class="btn btn-secondary" data-i18n="btnQuickReports">📄 التقارير</button>
+      </div>
+
+      <h3 class="section-heading" data-i18n="recentVisitsHeading">آخر الزيارات</h3>
+      <div id="recentVisitsList"></div>
+      <p id="noRecentVisitsMsg" class="empty-msg" style="display:none;" data-i18n="noRecentVisits">لا توجد زيارات بعد.</p>
+
+      <h2 id="schoolsSectionHeading" class="section-heading" data-i18n="schoolsHeading">مدارسي</h2>
 
       <div class="add-school-row">
         <input type="text" id="newSchoolNameInputHome" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة">
@@ -44,7 +64,6 @@
       <button id="viewUnlinkedBtn" class="btn btn-text" style="display:none;"></button>
 
       <button id="newReportBtn" class="btn btn-text" data-i18n="btnQuickReport">+ زيارة سريعة بدون مدرسة محددة</button>
-      <button id="openMonthlyBtn" class="btn btn-secondary btn-large" data-i18n="btnOpenMonthly">📅 الصور الشهرية للمدارس</button>
 
       <div class="action-row">
         <button id="exportBackupBtn" class="btn btn-text" data-i18n="btnExportBackup">💾 نسخة احتياطية</button>
@@ -53,16 +72,29 @@
       <input type="file" id="importBackupInput" accept="application/json" hidden>
     </section>
 
+    <!-- SCREEN: All Reports (flat list across every school) -->
+    <section id="screen-all-reports" class="screen">
+      <h2 data-i18n="allReportsHeading">كل التقارير</h2>
+      <div id="allReportsList"></div>
+      <p id="noAllReportsMsg" class="empty-msg" style="display:none;" data-i18n="noReportsAtAll">لا توجد أي زيارات بعد.</p>
+      <button id="allReportsBackBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
+    </section>
+
     <!-- SCREEN: School Detail -->
     <section id="screen-school-detail" class="screen">
       <h2 id="schoolDetailName"></h2>
       <p id="schoolDetailStats" class="muted"></p>
+      <p id="schoolMonthlyStatus" class="monthly-status-line"></p>
 
       <button id="startVisitBtn" class="btn btn-primary btn-large" data-i18n="btnStartVisit">🚀 بدء زيارة</button>
 
       <h3 class="section-heading" data-i18n="visitHistoryHeading">سجل الزيارات</h3>
       <div id="schoolVisitsList"></div>
       <p id="noSchoolVisitsMsg" class="empty-msg" data-i18n="noSchoolVisits">لا توجد زيارات بعد لهذي المدرسة.</p>
+
+      <h3 class="section-heading" data-i18n="schoolObsHistoryHeading">الملاحظات السابقة</h3>
+      <div id="schoolObsHistoryList"></div>
+      <p id="noSchoolObsMsg" class="empty-msg" style="display:none;" data-i18n="noSchoolObs">لا توجد ملاحظات سابقة.</p>
 
       <button id="schoolDetailBackBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
     </section>
@@ -176,6 +208,9 @@
       <h3 class="section-heading" data-i18n="spotLocationHeading">موقع الملاحظة</h3>
       <input type="text" id="observationSpotLocation" data-i18n-placeholder="spotLocationPlaceholder" placeholder="مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني">
 
+      <h3 class="section-heading" data-i18n="manualCategoryHeading">التصنيف (اختياري)</h3>
+      <select id="observationCategorySelect"></select>
+
       <h3 class="section-heading" data-i18n="textHeading">نص الملاحظة</h3>
       <textarea id="observationText" rows="5" data-i18n-placeholder="observationTextPlaceholder" placeholder="اكتب أو سجّل الملاحظة هنا"></textarea>
 
@@ -193,21 +228,7 @@
 
       <label class="field">
         <span data-i18n="aiCategoryLabel">التصنيف</span>
-        <select id="aiCategorySelect">
-          <option value="كهرباء">كهرباء</option>
-          <option value="حريق">حريق</option>
-          <option value="مخارج طوارئ">مخارج طوارئ</option>
-          <option value="سلامة المبنى">سلامة المبنى</option>
-          <option value="الأرضيات">الأرضيات</option>
-          <option value="الأبواب والنوافذ">الأبواب والنوافذ</option>
-          <option value="النظافة">النظافة</option>
-          <option value="المواد الكيميائية">المواد الكيميائية</option>
-          <option value="معدات السلامة">معدات السلامة</option>
-          <option value="الإسعافات الأولية">الإسعافات الأولية</option>
-          <option value="التمديدات">التمديدات</option>
-          <option value="المخاطر العامة">المخاطر العامة</option>
-          <option value="أخرى">أخرى</option>
-        </select>
+        <select id="aiCategorySelect"></select>
       </label>
 
       <label class="field">
@@ -257,6 +278,9 @@
       <label class="radio-row"><input type="radio" name="pdfImageType" id="pdfImageDocumented" value="documented"><span data-i18n="pdfImageDocumented">الصورة الموثقة</span></label>
       <label class="radio-row"><input type="radio" name="pdfImageType" id="pdfImageOriginal" value="original"><span data-i18n="pdfImageOriginal">الصورة الأصلية</span></label>
 
+      <h3 class="section-heading" data-i18n="footerTextHeading">نص التذييل (أسفل كل صفحة بالتقرير)</h3>
+      <input type="text" id="footerTextInput" data-i18n-placeholder="footerTextPlaceholder" placeholder="إعداد: م. ص.س.م / ولاء الجابري">
+
       <button id="savePhotoSettingsBtn" class="btn btn-primary btn-large" data-i18n="btnSaveSettings">حفظ الإعدادات</button>
       <button id="cancelPhotoSettingsBtn" class="btn btn-text" data-i18n="btnCancel">إلغاء</button>
     </section>
@@ -305,9 +329,28 @@
 
       <div id="monthlySlotsGrid" class="monthly-slots-grid"></div>
 
+      <button id="openPptxSummaryBtn" class="btn btn-primary btn-large" data-i18n="btnGeneratePptx">🖥️ توليد PowerPoint</button>
+
       <button id="monthlySchoolBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
       <input type="file" id="monthlyCameraInput" accept="image/*" capture="environment" hidden>
       <input type="file" id="monthlyGalleryInput" accept="image/*" hidden>
+    </section>
+
+    <!-- SCREEN: PowerPoint generation summary -->
+    <section id="screen-pptx-summary" class="screen">
+      <h2 data-i18n="pptxSummaryHeading">ملخص قبل التوليد</h2>
+
+      <div class="pptx-summary-card">
+        <p><strong data-i18n="pptxSummarySchool">المدرسة:</strong> <span id="pptxSummarySchoolName"></span></p>
+        <p><strong data-i18n="pptxSummaryMonth">الشهر:</strong> <span id="pptxSummaryMonth"></span></p>
+        <p><strong data-i18n="pptxSummaryPhotos">الصور:</strong> <span id="pptxSummaryPhotos"></span></p>
+      </div>
+
+      <p id="pptxMissingNote" class="previous-visit-note" style="display:none;"></p>
+
+      <button id="generatePptxBtn" class="btn btn-primary btn-large" data-i18n="btnGeneratePptxConfirm">توليد PowerPoint</button>
+      <p id="pptxGeneratingMsg" class="muted" style="display:none;" data-i18n="pptxGenerating">⏳ جاري التوليد...</p>
+      <button id="pptxSummaryBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
     </section>
 
   </main>
@@ -331,11 +374,13 @@
   <div id="toast" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="storage.js?v=10"></script>
-  <script src="media.js?v=10"></script>
-  <script src="photodoc.js?v=10"></script>
-  <script src="pdf.js?v=10"></script>
-  <script src="app.js?v=10"></script>
-  <script src="monthly.js?v=10"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="storage.js?v=16"></script>
+  <script src="media.js?v=16"></script>
+  <script src="photodoc.js?v=16"></script>
+  <script src="pdf.js?v=16"></script>
+  <script src="pptx.js?v=16"></script>
+  <script src="app.js?v=16"></script>
+  <script src="monthly.js?v=16"></script>
 </body>
 </html>
