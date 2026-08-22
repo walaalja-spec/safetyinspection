@@ -6,6 +6,7 @@
 <title>WJ Safety</title>
 <link rel="manifest" href="manifest.json?v=20">
 <meta name="theme-color" content="#1f5e3d">
+<meta name="color-scheme" content="light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -64,11 +65,11 @@
       <h2 id="schoolsSectionHeading" class="section-heading" data-i18n="schoolsHeading">مدارسي</h2>
 
       <div class="add-school-row">
-        <input type="text" id="newSchoolNameInputHome" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة">
+        <input type="text" id="newSchoolNameInputHome" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة" autocomplete="off" enterkeyhint="done">
         <button type="button" id="addSchoolBtnHome" class="btn btn-primary">+</button>
       </div>
 
-      <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="searchSchoolPlaceholder" placeholder="بحث بالمدرسة">
+      <input type="search" id="searchInput" class="search-input" data-i18n-placeholder="searchSchoolPlaceholder" placeholder="بحث بالمدرسة" autocomplete="off" enterkeyhint="search">
 
       <div id="schoolsHomeList"></div>
       <div id="noSchoolsMsg" class="empty-state" style="display:none;">
@@ -164,7 +165,7 @@
     <section id="screen-scene-template" class="screen">
       <h2 data-i18n="manageScenesHeading">إدارة قائمة المشاهد</h2>
       <div class="add-school-row">
-        <input type="text" id="newSceneNameInput" data-i18n-placeholder="newScenePlaceholder" placeholder="اسم مشهد جديد">
+        <input type="text" id="newSceneNameInput" data-i18n-placeholder="newScenePlaceholder" placeholder="اسم مشهد جديد" autocomplete="off" enterkeyhint="done">
         <button type="button" id="addSceneBtn" class="btn btn-primary">+</button>
       </div>
       <div id="sceneTemplateList"></div>
@@ -291,7 +292,7 @@
         <select id="observationCategorySelect"></select>
 
         <h3 class="section-heading" data-i18n="spotLocationHeading">موقع الملاحظة</h3>
-        <input type="text" id="observationSpotLocation" data-i18n-placeholder="spotLocationPlaceholder" placeholder="مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني">
+        <input type="text" id="observationSpotLocation" data-i18n-placeholder="spotLocationPlaceholder" placeholder="مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني" autocomplete="off" enterkeyhint="done">
       </div>
 
       <button type="button" id="saveObservationBtn" class="btn btn-primary btn-large btn-cta" data-i18n="btnSaveObservation">حفظ الملاحظة</button>
@@ -372,7 +373,7 @@
       </label>
 
       <div class="add-school-row">
-        <input type="text" id="newSchoolNameInput" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة">
+        <input type="text" id="newSchoolNameInput" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة" autocomplete="off" enterkeyhint="done">
         <button type="button" id="addSchoolBtn" class="btn btn-primary">+</button>
       </div>
 

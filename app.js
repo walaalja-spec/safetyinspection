@@ -518,10 +518,10 @@ document.getElementById("langToggle").addEventListener("click", () => {
 
 // ---------- Toast ----------
 let toastTimer = null;
-function showToast(message) {
+function showToast(message, type = "") {
   const el = document.getElementById("toast");
   el.textContent = message;
-  el.classList.add("show");
+  el.className = "toast show" + (type ? ` toast-${type}` : "");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
 }
@@ -723,7 +723,7 @@ async function renderSchoolsHomeList() {
       btn.addEventListener("click", async () => {
         if (confirm(t("monthlyDeleteSchoolConfirm"))) {
           await deleteMonthlySchool(btn.dataset.id);
-          showToast(t("monthlySchoolDeleted"));
+          showToast(t("monthlySchoolDeleted"), "success");
           renderHome();
         }
       });
@@ -791,7 +791,7 @@ document.getElementById("addSchoolBtnHome").addEventListener("click", async () =
   const input = document.getElementById("newSchoolNameInputHome");
   const name = input.value.trim();
   if (!name) {
-    showToast(t("needSchoolName"));
+    showToast(t("needSchoolName"), "warning");
     return;
   }
   const newSchool = await addMonthlySchool(name);
@@ -909,7 +909,7 @@ async function openSchoolDetail(schoolId) {
       btn.addEventListener("click", async () => {
         if (confirm(t("confirmDeleteReport"))) {
           await deleteReportById(btn.dataset.id);
-          showToast(t("reportDeleted"));
+          showToast(t("reportDeleted"), "success");
           openSchoolDetail(schoolId);
         }
       });
@@ -979,7 +979,7 @@ async function reuseObservationForSchool(obsData) {
   document.getElementById("observationSpotLocation").value = obsData.spotLocation || "";
   document.getElementById("observationCategorySelect").value = obsData.category || "";
   editingAIFields = obsData.recommendedAction ? { recommendedAction: obsData.recommendedAction } : {};
-  showToast(t("noteReused"));
+  showToast(t("noteReused"), "success");
 }
 
 let activeSchoolForVisits = null;
@@ -1055,7 +1055,7 @@ document.getElementById("viewUnlinkedBtn").addEventListener("click", () => {
     btn.addEventListener("click", async () => {
       if (confirm(t("confirmDeleteReport"))) {
         await deleteReportById(btn.dataset.id);
-        showToast(t("reportDeleted"));
+        showToast(t("reportDeleted"), "success");
         await renderHome();
         document.getElementById("viewUnlinkedBtn").click();
       }
@@ -1086,10 +1086,10 @@ document.getElementById("exportBackupBtn").addEventListener("click", async () =>
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast(t("backupExported"));
+    showToast(t("backupExported"), "success");
   } catch (err) {
     console.error(err);
-    showToast(t("backupFailed"));
+    showToast(t("backupFailed"), "error");
   }
 });
 
@@ -1103,11 +1103,11 @@ document.getElementById("importBackupInput").addEventListener("change", async (e
   if (!file) return;
   try {
     const summary = await importBackupFile(file);
-    showToast(t("backupImported")(summary));
+    showToast(t("backupImported")(summary), "success");
     renderHome();
   } catch (err) {
     console.error(err);
-    showToast(t("backupImportFailed"));
+    showToast(t("backupImportFailed"), "error");
   }
 });
 
@@ -1205,7 +1205,7 @@ async function renderReportScreen() {
         if (confirm(t("confirmDeleteObservation"))) {
           activeReport.observations.splice(parseInt(btn.dataset.i, 10), 1);
           await saveReport(activeReport);
-          showToast(t("observationDeleted"));
+          showToast(t("observationDeleted"), "success");
           await renderReportScreen();
         }
       });
@@ -1271,7 +1271,7 @@ document.getElementById("editReportForm").addEventListener("submit", async (e) =
   activeReport.location = document.getElementById("editReportLocation").value.trim();
   activeReport.date = document.getElementById("editReportDate").value;
   await saveReport(activeReport);
-  showToast(t("reportUpdated"));
+  showToast(t("reportUpdated"), "success");
   await renderReportScreen();
   showScreen("screen-report");
 });
@@ -1382,7 +1382,7 @@ async function handlePhotoInput(e) {
     renderPhotosGrid();
   } catch (err) {
     console.error(err);
-    showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.");
+    showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.", "error");
   }
   e.target.value = "";
 }
@@ -1475,7 +1475,7 @@ function formatTimer(sec) {
 document.getElementById("recordBtn").addEventListener("click", async () => {
   if (!isRecording) {
     if (!window.isSecureContext) {
-      showToast(t("micNeedsHttps"));
+      showToast(t("micNeedsHttps"), "warning");
       return;
     }
     try {
@@ -1488,7 +1488,7 @@ document.getElementById("recordBtn").addEventListener("click", async () => {
       document.getElementById("audioPlaybackBox").style.display = "none";
     } catch (err) {
       console.error(err);
-      showToast(t("micDenied"));
+      showToast(t("micDenied"), "warning");
     }
   } else {
     const { blob, transcript } = await recorder.stop();
@@ -1505,7 +1505,7 @@ document.getElementById("recordBtn").addEventListener("click", async () => {
       if (transcript && !textarea.value.trim()) {
         textarea.value = transcript;
       } else if (!transcript && !recorder.speechSupported) {
-        showToast(t("noTranscript"));
+        showToast(t("noTranscript"), "warning");
       }
     }
   }
@@ -1525,7 +1525,7 @@ document.getElementById("reRecordBtn").addEventListener("click", () => {
 
 document.getElementById("transcribeBtn").addEventListener("click", () => {
   if (!pendingTranscript) {
-    showToast(t("noTranscript"));
+    showToast(t("noTranscript"), "warning");
     return;
   }
   const textarea = document.getElementById("observationText");
@@ -1567,12 +1567,12 @@ window.addEventListener("online", flushPendingSaves);
 async function saveCurrentObservation(extraFields) {
   const text = document.getElementById("observationText").value.trim();
   if (!text) {
-    showToast(t("needText"));
+    showToast(t("needText"), "warning");
     return false;
   }
   const spotLocation = document.getElementById("observationSpotLocation").value.trim();
   if (!spotLocation) {
-    showToast(t("needSpotLocation"));
+    showToast(t("needSpotLocation"), "warning");
     return false;
   }
 
@@ -1597,7 +1597,7 @@ async function saveCurrentObservation(extraFields) {
   // Optimistic UI: reflect the save immediately and move on. The actual
   // IndexedDB write happens in the background and retries on its own —
   // the user is never blocked or shown a failure for this.
-  showToast(extraFields && extraFields.pendingAI ? t("offlineAnalyzeSaved") : t("observationSaved"));
+  showToast(extraFields && extraFields.pendingAI ? t("offlineAnalyzeSaved") : t("observationSaved"), "success");
   await renderReportScreen();
   showScreen("screen-report");
 
@@ -1643,7 +1643,7 @@ function aiErrorMessage(errData) {
 document.getElementById("analyzeAIBtn").addEventListener("click", async () => {
   const text = document.getElementById("observationText").value.trim();
   if (!text && stagedPhotos.length === 0) {
-    showToast(t("aiNeedInput"));
+    showToast(t("aiNeedInput"), "warning");
     return;
   }
 
@@ -1670,7 +1670,7 @@ document.getElementById("analyzeAIBtn").addEventListener("click", async () => {
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
       console.error("AI analyze error:", errData);
-      showToast(aiErrorMessage(errData));
+      showToast(aiErrorMessage(errData), "error");
       return;
     }
 
@@ -1678,7 +1678,7 @@ document.getElementById("analyzeAIBtn").addEventListener("click", async () => {
     openAIReviewScreen(result);
   } catch (err) {
     console.error(err);
-    showToast(t("aiAnalyzeFailed"));
+    showToast(t("aiAnalyzeFailed"), "error");
   } finally {
     analyzingMsg.style.display = "none";
     btn.disabled = false;
@@ -1770,7 +1770,7 @@ document.getElementById("analyzePendingBtn").addEventListener("click", async () 
   await saveReport(activeReport);
   btn.disabled = false;
   btn.textContent = originalLabel;
-  showToast(t("analyzingPendingDone")(successCount, pendingObs.length));
+  showToast(t("analyzingPendingDone")(successCount, pendingObs.length), "success");
   await renderReportScreen();
 });
 
@@ -1809,7 +1809,7 @@ document.getElementById("previewBackBtn").addEventListener("click", () => showSc
 // ---------- PDF ----------
 async function handleGeneratePdf() {
   if (!activeReport.observations.length) {
-    showToast(t("noObservationsForPdf"));
+    showToast(t("noObservationsForPdf"), "warning");
     return;
   }
   try {
@@ -1827,16 +1827,16 @@ async function handleGeneratePdf() {
     // ...and always leave a visible, tappable link too, in case the
     // automatic download was silently blocked (common on iPhone Safari).
     showPdfFallbackLink(url, fileName);
-    showToast(t("pdfSuccess"));
+    showToast(t("pdfSuccess"), "success");
   } catch (err) {
     console.error(err);
-    showToast(t("pdfFailed"));
+    showToast(t("pdfFailed"), "error");
   }
 }
 
 async function handleSharePdf() {
   if (!activeReport.observations.length) {
-    showToast(t("noObservationsForPdf"));
+    showToast(t("noObservationsForPdf"), "warning");
     return;
   }
   try {
@@ -1849,7 +1849,7 @@ async function handleSharePdf() {
     }
   } catch (err) {
     console.error(err);
-    showToast(t("pdfFailed"));
+    showToast(t("pdfFailed"), "error");
   }
 }
 document.getElementById("sharePdfBtn").addEventListener("click", handleSharePdf);
@@ -1898,7 +1898,7 @@ document.getElementById("savePhotoSettingsBtn").addEventListener("click", async 
     footerText: document.getElementById("footerTextInput").value.trim() || defaultPhotoSettings().footerText
   };
   await saveReport(activeReport);
-  showToast(currentLang === "ar" ? "تم حفظ الإعدادات." : "Settings saved.");
+  showToast(currentLang === "ar" ? "تم حفظ الإعدادات." : "Settings saved.", "success");
   showScreen("screen-report");
 });
 
