@@ -1,6 +1,7 @@
 {
-  "name": "Walaa Safety",
-  "short_name": "Walaa Safety",
+  "name": "WJ Safety",
+  "short_name": "WJ Safety",
+  "description": "WJ Safety | School Safety Management",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

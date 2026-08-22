@@ -7,11 +7,17 @@
 // ---------------------------------------------------------------------
 
 const DB_NAME = "safety_inspection_db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = "reports";
 const MONTHLY_TEMPLATE_STORE = "monthly_templates";
 const MONTHLY_SCHOOLS_STORE = "monthly_schools";
 const MONTHLY_SUBMISSIONS_STORE = "monthly_submissions";
+// New, independent from the monthly-photos system by explicit request —
+// a separate configurable list of "scenes" with their own status
+// workflow, scoped by school + month exactly like monthly photos are,
+// but otherwise unrelated data.
+const SCENE_TEMPLATE_STORE = "scene_templates";
+const SCENE_TRACKING_STORE = "scene_tracking";
 
 // Single shared connection, opened once and reused — avoids the
 // overhead/edge-cases of re-opening a fresh IndexedDB connection on
@@ -38,6 +44,12 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains(MONTHLY_SUBMISSIONS_STORE)) {
         db.createObjectStore(MONTHLY_SUBMISSIONS_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(SCENE_TEMPLATE_STORE)) {
+        db.createObjectStore(SCENE_TEMPLATE_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(SCENE_TRACKING_STORE)) {
+        db.createObjectStore(SCENE_TRACKING_STORE, { keyPath: "id" });
       }
     };
 
@@ -457,4 +469,66 @@ async function getMonthlySubmission(schoolId, monthKey) {
 async function saveMonthlySubmission(submission) {
   submission.updatedAt = Date.now();
   await storePut(MONTHLY_SUBMISSIONS_STORE, submission);
+}
+
+// ---------------------------------------------------------------------
+// Scene tracking ("📋 متابعة المشاهد") — independent list from the
+// monthly-photos slots, but the same school+month scoping pattern.
+// ---------------------------------------------------------------------
+
+// Scene definitions: one global, user-managed list — { id, label } — like
+// the monthly-photo slots editor, but its own separate store.
+async function getSceneTemplate() {
+  const record = await storeGet(SCENE_TEMPLATE_STORE, "template");
+  return record && Array.isArray(record.scenes) ? record.scenes : [];
+}
+
+async function saveSceneTemplate(scenes) {
+  await storePut(SCENE_TEMPLATE_STORE, { id: "template", scenes, updatedAt: Date.now() });
+}
+
+function sceneTrackingId(schoolId, monthKey) {
+  return `${schoolId}__${monthKey}`;
+}
+
+// Returns { id, schoolId, monthKey, createdAt, updatedAt,
+//           scenes: { [sceneId]: { status, updatedAt, history: [{status, at}] } } }
+// A brand-new school+month combination is returned as a blank record —
+// deterministic id (schoolId__monthKey) means calling this repeatedly
+// for the same month never creates duplicates.
+async function getSceneTracking(schoolId, monthKey) {
+  const record = await storeGet(SCENE_TRACKING_STORE, sceneTrackingId(schoolId, monthKey));
+  return record || {
+    id: sceneTrackingId(schoolId, monthKey),
+    schoolId,
+    monthKey,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    scenes: {}
+  };
+}
+
+async function saveSceneTracking(tracking) {
+  tracking.updatedAt = Date.now();
+  await storePut(SCENE_TRACKING_STORE, tracking);
+}
+
+async function getAllSceneTrackingForSchool(schoolId) {
+  const all = await storeGetAll(SCENE_TRACKING_STORE);
+  return all.filter((t) => t.schoolId === schoolId);
+}
+
+function sceneCompletionStats(scenes, trackingRecord) {
+  const statuses = trackingRecord && trackingRecord.scenes ? trackingRecord.scenes : {};
+  let received = 0, sent = 0, notDone = 0;
+  scenes.forEach((scene) => {
+    const s = statuses[scene.id] ? statuses[scene.id].status : "not_done";
+    if (s === "received") received++;
+    else if (s === "sent_to_supervisor") sent++;
+    else notDone++;
+  });
+  const total = scenes.length;
+  const completed = received + sent;
+  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  return { total, received, sent, notDone, completed, percent };
 }

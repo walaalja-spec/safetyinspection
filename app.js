@@ -44,7 +44,7 @@ const recorder = new VoiceRecorder();
 // ---------- Translations ----------
 const translations = {
   ar: {
-    appTitle: "ملاحظاتي",
+    appTitle: "WJ Safety",
     btnNewReportHome: "+ إنشاء تقرير جديد",
     previousReportsHeading: "التقارير السابقة",
     noReports: "لا توجد تقارير حتى الآن",
@@ -72,6 +72,7 @@ const translations = {
     observationHeading: "الملاحظة",
     photoHeading: "الصور",
     btnTakePhoto: "📷 تصوير الملاحظة",
+    btnTakePhoto2: "📷 إضافة صورة",
     btnPickPhoto: "اختيار من الصور",
     removePhoto: "حذف",
     moreActions: "المزيد",
@@ -100,7 +101,7 @@ const translations = {
     shareFallbackMsg: "افتحنا الصورة في تبويب جديد — اضغطي مطولاً عليها ثم احفظيها.",
     voiceHeading: "الملاحظة الصوتية",
     recording: "جاري التسجيل",
-    btnRecord: "🎙️ تسجيل",
+    btnRecord: "🎙️ اضغطي وتكلمي",
     btnStopRecord: "⏹ إيقاف التسجيل",
     btnDeleteAudio: "🗑 حذف التسجيل",
     btnReRecord: "🎙 تسجيل مرة أخرى",
@@ -166,6 +167,14 @@ const translations = {
     btnStartVisit: "🚀 بدء زيارة",
     visitHistoryHeading: "سجل الزيارات",
     noSchoolVisits: "لا توجد زيارات بعد لهذي المدرسة.",
+    noVisitsYetShort: "لا توجد زيارات بعد",
+    btnStartVisit2: "＋ زيارة جديدة",
+    btnSchoolMonthly: "📷 الصور الشهرية",
+    btnSchoolReports: "📄 التقارير",
+    tabVisits: "سجل الزيارات",
+    tabObservations: "الملاحظات",
+    statusComplete: "مكتمل",
+    statusIncomplete: "ناقص",
     unlinkedVisitsHeading: "زيارات غير مرتبطة بمدرسة",
     unlinkedVisitsHint: "هذي الزيارات لها اسم موقع لا يطابق أي مدرسة محفوظة حاليًا.",
     unlinkedVisitsBtn: (n) => `📁 زيارات غير مرتبطة بمدرسة (${n})`,
@@ -182,7 +191,7 @@ const translations = {
     btnApproveAI: "✅ اعتماد وحفظ",
     spotLocationHeading: "موقع الملاحظة",
     manualCategoryHeading: "التصنيف (اختياري)",
-    dashboardHeading: "لوحة التحكم",
+    dashboardHeading: "ملخص عملك اليوم",
     statSchoolsLabel: "مدارس",
     statVisitsLabel: "زيارات",
     statObsLabel: "ملاحظات",
@@ -191,7 +200,7 @@ const translations = {
     btnQuickSchools: "🏫 المدارس",
     btnOpenMonthlyShort: "📸 الصور الشهرية",
     btnQuickReports: "📄 التقارير",
-    recentVisitsHeading: "آخر الزيارات",
+    recentVisitsHeading: "آخر النشاطات",
     noRecentVisits: "لا توجد زيارات بعد.",
     allReportsHeading: "كل التقارير",
     noReportsAtAll: "لا توجد أي زيارات بعد.",
@@ -210,6 +219,42 @@ const translations = {
     pptxGenerating: "⏳ جاري التوليد...",
     pptxGenerated: "تم توليد ملف PowerPoint.",
     pptxGenerateFailed: "تعذر توليد الملف. تأكدي من الاتصال بالإنترنت وحاولي مرة أخرى.",
+    btnMultiSchool: "🖥️ تجميع تقارير المدارس",
+    multiSchoolSelectHeading: "اختيار المدارس",
+    btnSelectAll: "تحديد الكل",
+    btnSelectNone: "إلغاء تحديد الكل",
+    btnNext: "التالي",
+    multiNeedSelection: "اختاري مدرسة واحدة على الأقل.",
+    multiSummarySchoolsCount: "المدارس المحددة:",
+    multiMissingWarning: "⚠️ بعض المدارس تحتوي على صور ناقصة (الخانة الناقصة تبقى بصورة القالب الأصلية):",
+    btnSceneTracking: "📋 متابعة المشاهد",
+    sceneStatReceived: "تم الاستلام",
+    sceneStatSent: "أُرسل للمشرف",
+    sceneStatNotDone: "لم يتم",
+    sceneStatPercent: "نسبة الإنجاز",
+    noScenesYet: "لم تتم إضافة أي مشاهد بعد. أضيفي مشاهد من ⚙ إدارة قائمة المشاهد.",
+    btnManageScenes: "⚙ إدارة قائمة المشاهد",
+    btnSceneHistory: "🗂️ سجل الأشهر السابقة",
+    sceneHistoryHeading: "🗂️ سجل الأشهر السابقة",
+    noSceneHistory: "لا يوجد سجل سابق بعد.",
+    manageScenesHeading: "إدارة قائمة المشاهد",
+    newScenePlaceholder: "اسم مشهد جديد",
+    needSceneName: "الرجاء كتابة اسم المشهد.",
+    sceneAdded: "تمت إضافة المشهد.",
+    sceneDeleted: "تم حذف المشهد.",
+    confirmDeleteScene: "هل تريدين حذف هذا المشهد؟",
+    sceneSaveFailed: "تعذر حفظ الحالة. حاولي مرة أخرى.",
+    greetingMorning: "صباح الخير 👋",
+    greetingAfternoon: "مساء الخير 👋",
+    greetingEvening: "مساء الخير 👋",
+    btnQuickStartVisit2: "＋ زيارة جديدة",
+    quickAccessHeading: "الوصول السريع",
+    tileSchools: "المدارس",
+    tileMonthly: "الصور الشهرية",
+    tileReports: "التقارير",
+    tileSearch: "البحث",
+    noSchoolsHomeTitle: "لا توجد مدارس بعد",
+    noSchoolsHomeSub: "أضيفي أول مدرسة من الأعلى للبدء",
     spotLocationPlaceholder: "مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني",
     needSpotLocation: "الرجاء كتابة موقع الملاحظة.",
     obsSpotLabel: "الموقع",
@@ -220,7 +265,7 @@ const translations = {
     analyzingPendingDone: (ok, total) => `تم تحليل ${ok} من ${total} ملاحظة معلّقة.`
   },
   en: {
-    appTitle: "My Observations",
+    appTitle: "WJ Safety",
     btnNewReportHome: "+ New Report",
     previousReportsHeading: "Previous Reports",
     noReports: "No reports yet",
@@ -248,6 +293,7 @@ const translations = {
     observationHeading: "Observation",
     photoHeading: "Photos",
     btnTakePhoto: "📷 Take Photo",
+    btnTakePhoto2: "📷 Add Photo",
     btnPickPhoto: "Choose from Photos",
     removePhoto: "Remove",
     moreActions: "More",
@@ -276,7 +322,7 @@ const translations = {
     shareFallbackMsg: "Opened the photo in a new tab — press and hold it to save.",
     voiceHeading: "Voice Note",
     recording: "Recording",
-    btnRecord: "🎙️ Record",
+    btnRecord: "🎙️ Tap and Speak",
     btnStopRecord: "⏹ Stop Recording",
     btnDeleteAudio: "🗑 Delete Recording",
     btnReRecord: "🎙 Record Again",
@@ -342,6 +388,14 @@ const translations = {
     btnStartVisit: "🚀 Start Visit",
     visitHistoryHeading: "Visit History",
     noSchoolVisits: "No visits yet for this school.",
+    noVisitsYetShort: "No visits yet",
+    btnStartVisit2: "＋ New Visit",
+    btnSchoolMonthly: "📷 Monthly Photos",
+    btnSchoolReports: "📄 Reports",
+    tabVisits: "Visit History",
+    tabObservations: "Observations",
+    statusComplete: "Complete",
+    statusIncomplete: "Incomplete",
     unlinkedVisitsHeading: "Visits Not Linked to a School",
     unlinkedVisitsHint: "These visits have a location name that doesn't match any currently saved school.",
     unlinkedVisitsBtn: (n) => `📁 Unlinked visits (${n})`,
@@ -358,7 +412,7 @@ const translations = {
     btnApproveAI: "✅ Approve & Save",
     spotLocationHeading: "Observation Location",
     manualCategoryHeading: "Category (optional)",
-    dashboardHeading: "Dashboard",
+    dashboardHeading: "Today's Summary",
     statSchoolsLabel: "Schools",
     statVisitsLabel: "Visits",
     statObsLabel: "Observations",
@@ -367,7 +421,7 @@ const translations = {
     btnQuickSchools: "🏫 Schools",
     btnOpenMonthlyShort: "📸 Monthly Photos",
     btnQuickReports: "📄 Reports",
-    recentVisitsHeading: "Recent Visits",
+    recentVisitsHeading: "Recent Activity",
     noRecentVisits: "No visits yet.",
     allReportsHeading: "All Reports",
     noReportsAtAll: "No visits yet.",
@@ -386,6 +440,42 @@ const translations = {
     pptxGenerating: "⏳ Generating...",
     pptxGenerated: "PowerPoint file generated.",
     pptxGenerateFailed: "Couldn't generate the file. Check your connection and try again.",
+    btnMultiSchool: "🖥️ Combine School Reports",
+    multiSchoolSelectHeading: "Select Schools",
+    btnSelectAll: "Select All",
+    btnSelectNone: "Deselect All",
+    btnNext: "Next",
+    multiNeedSelection: "Select at least one school.",
+    multiSummarySchoolsCount: "Selected schools:",
+    multiMissingWarning: "⚠️ Some schools have missing photos (that spot keeps the template's original photo):",
+    btnSceneTracking: "📋 Scene Tracking",
+    sceneStatReceived: "Received",
+    sceneStatSent: "Sent to Supervisor",
+    sceneStatNotDone: "Not Done",
+    sceneStatPercent: "Completion Rate",
+    noScenesYet: "No scenes added yet. Add some from ⚙ Manage Scene List.",
+    btnManageScenes: "⚙ Manage Scene List",
+    btnSceneHistory: "🗂️ Previous Months",
+    sceneHistoryHeading: "🗂️ Previous Months",
+    noSceneHistory: "No history yet.",
+    manageScenesHeading: "Manage Scene List",
+    newScenePlaceholder: "New scene name",
+    needSceneName: "Please enter a scene name.",
+    sceneAdded: "Scene added.",
+    sceneDeleted: "Scene deleted.",
+    confirmDeleteScene: "Delete this scene?",
+    sceneSaveFailed: "Couldn't save the status. Please try again.",
+    greetingMorning: "Good morning 👋",
+    greetingAfternoon: "Good afternoon 👋",
+    greetingEvening: "Good evening 👋",
+    btnQuickStartVisit2: "＋ New Visit",
+    quickAccessHeading: "Quick Access",
+    tileSchools: "Schools",
+    tileMonthly: "Monthly Photos",
+    tileReports: "Reports",
+    tileSearch: "Search",
+    noSchoolsHomeTitle: "No schools yet",
+    noSchoolsHomeSub: "Add your first school above to get started",
     spotLocationPlaceholder: "e.g. Classroom 3B - next to the whiteboard, or Teachers' Room - 2nd floor",
     needSpotLocation: "Please enter the observation location.",
     obsSpotLabel: "Location",
@@ -457,6 +547,11 @@ const screenBackButtonMap = {
   "screen-monthly-template": "cancelSlotsBtn",
   "screen-monthly-school": "monthlySchoolBackBtn",
   "screen-pptx-summary": "pptxSummaryBackBtn",
+  "screen-multi-school-select": "multiSchoolBackBtn",
+  "screen-multi-school-summary": "multiSummaryBackBtn",
+  "screen-scene-tracking": "sceneTrackingBackBtn",
+  "screen-scene-history": "sceneHistoryBackBtn",
+  "screen-scene-template": "sceneTemplateBackBtn",
   "screen-school-detail": "schoolDetailBackBtn",
   "screen-unlinked-visits": "unlinkedVisitsBackBtn",
   "screen-ai-review": "aiCancelBtn",
@@ -491,7 +586,7 @@ async function renderHome() {
   cachedAllReports = await getAllReports();
   renderDashboardStats();
   renderRecentVisits();
-  renderSchoolsHomeList();
+  await renderSchoolsHomeList();
 }
 
 function resolveSchoolNameForReport(report) {
@@ -511,6 +606,10 @@ function renderDashboardStats() {
   document.getElementById("statVisits").textContent = cachedAllReports.length;
   document.getElementById("statObservations").textContent = totalObs;
   document.getElementById("statThisMonth").textContent = thisMonthCount;
+
+  const hour = new Date().getHours();
+  const greetingKey = hour < 12 ? "greetingMorning" : hour < 17 ? "greetingAfternoon" : "greetingEvening";
+  document.getElementById("homeGreetingTime").textContent = t(greetingKey);
 }
 
 function renderRecentVisits() {
@@ -563,7 +662,7 @@ function schoolStats(school) {
   return { visits, visitCount: visits.length, obsCount, lastVisit };
 }
 
-function renderSchoolsHomeList() {
+async function renderSchoolsHomeList() {
   const query = document.getElementById("searchInput").value.trim().toLowerCase();
   const schools = query
     ? cachedSchools.filter((s) => (s.name || "").toLowerCase().includes(query))
@@ -575,24 +674,47 @@ function renderSchoolsHomeList() {
 
   if (schools.length === 0) {
     emptyEl.style.display = "block";
-    emptyEl.textContent = query ? t("noSearchResults") : t("noSchoolsHome");
+    if (query) {
+      emptyEl.innerHTML = `<div class="empty-state-icon">🔎</div><div class="empty-state-title">${escapeHtml(t("noSearchResults"))}</div>`;
+    } else {
+      emptyEl.innerHTML = `<div class="empty-state-icon">🏫</div><div class="empty-state-title">${escapeHtml(t("noSchoolsHomeTitle"))}</div><div class="empty-state-sub">${escapeHtml(t("noSchoolsHomeSub"))}</div>`;
+    }
   } else {
     emptyEl.style.display = "none";
+    const monthlySlotsForCards = await getMonthlySlots();
+    const monthKeyForCards = new Date().toISOString().slice(0, 7);
 
-    schools.forEach((school) => {
+    for (const school of schools) {
       const stats = schoolStats(school);
+      let monthlyDone = 0;
+      try {
+        const submission = await getMonthlySubmission(school.id, monthKeyForCards);
+        monthlyDone = Object.keys(submission.photos || {}).length;
+      } catch (e) { /* monthly photos not started yet for this school */ }
+      const monthlyTotal = monthlySlotsForCards.length;
+      const monthlyPct = monthlyTotal > 0 ? Math.round((monthlyDone / monthlyTotal) * 100) : 0;
+
       const card = document.createElement("div");
-      card.className = "report-card";
+      card.className = "report-card school-card";
       card.innerHTML = `
         <h4>${escapeHtml(school.name)}</h4>
-        <p class="muted">${t("visitsCount")(stats.visitCount)} · ${t("obsCount")(stats.obsCount)}${stats.lastVisit ? " · " + t("lastVisitLabel") + " " + escapeHtml(stats.lastVisit) : ""}</p>
+        <p class="muted">${stats.lastVisit ? t("lastVisitLabel") + " " + escapeHtml(stats.lastVisit) : t("noVisitsYetShort")}</p>
+        <div class="school-card-badges">
+          <span class="status-badge status-progress">${t("visitsCount")(stats.visitCount)}</span>
+          <span class="status-badge status-progress">● ${t("obsCount")(stats.obsCount)}</span>
+        </div>
+        ${monthlyTotal > 0 ? `
+          <div class="school-card-monthly">
+            <p class="muted">📷 ${t("tileMonthly")} ${monthlyDone}/${monthlyTotal}</p>
+            <div class="progress-bar-track"><div class="progress-bar-fill ${monthlyPct < 100 ? "warning" : ""}" style="width:${monthlyPct}%"></div></div>
+          </div>` : ""}
         <div class="card-actions">
           <button class="card-open school-open" data-id="${school.id}">${t("openBtn")}</button>
           <button class="card-delete school-delete" data-id="${school.id}">${t("deleteBtn")}</button>
         </div>
       `;
       listEl.appendChild(card);
-    });
+    }
 
     listEl.querySelectorAll(".school-open").forEach((btn) => {
       btn.addEventListener("click", () => openSchoolDetail(btn.dataset.id));
@@ -686,6 +808,7 @@ function scrollToSchoolsSection() {
 }
 document.getElementById("quickStartVisitBtn").addEventListener("click", scrollToSchoolsSection);
 document.getElementById("quickSchoolsBtn").addEventListener("click", scrollToSchoolsSection);
+document.getElementById("quickSearchBtn").addEventListener("click", scrollToSchoolsSection);
 
 document.getElementById("quickReportsBtn").addEventListener("click", () => {
   const listEl = document.getElementById("allReportsList");
@@ -699,13 +822,18 @@ document.getElementById("quickReportsBtn").addEventListener("click", () => {
     emptyEl.style.display = "none";
     sorted.forEach((report) => {
       const card = document.createElement("div");
-      card.className = "report-card";
+      card.className = "report-card report-list-card";
       card.innerHTML = `
-        <h4>${escapeHtml(report.title)}</h4>
-        <p class="muted">${escapeHtml(resolveSchoolNameForReport(report))} — ${escapeHtml(report.date)} · ${t("obsCount")(report.observations.length)}</p>
-        <div class="card-actions">
-          <button class="card-open ar-open" data-id="${report.id}">${t("openBtn")}</button>
+        <div class="report-list-card-icon">📄</div>
+        <div class="report-list-card-body">
+          <h4>${escapeHtml(report.title)}</h4>
+          <p class="muted">${escapeHtml(resolveSchoolNameForReport(report))}</p>
+          <div class="school-card-badges">
+            <span class="status-badge status-progress">${escapeHtml(report.date)}</span>
+            <span class="status-badge status-progress">● ${t("obsCount")(report.observations.length)}</span>
+          </div>
         </div>
+        <button class="card-open ar-open" data-id="${report.id}">${t("openBtn")}</button>
       `;
       listEl.appendChild(card);
     });
@@ -725,6 +853,12 @@ async function openSchoolDetail(schoolId) {
   const school = cachedSchools.find((s) => s.id === schoolId);
   if (!school) return;
   activeSchoolForVisits = school;
+
+  // Always reset to the "visits" tab when (re-)entering a school profile.
+  document.querySelectorAll(".school-tab-btn").forEach((b) => b.classList.remove("active"));
+  document.querySelector('.school-tab-btn[data-tab="visits"]').classList.add("active");
+  document.getElementById("schoolTabVisits").style.display = "block";
+  document.getElementById("schoolTabObs").style.display = "none";
 
   const stats = schoolStats(school);
   document.getElementById("schoolDetailName").textContent = school.name;
@@ -865,6 +999,31 @@ document.getElementById("startVisitBtn").addEventListener("click", async () => {
   };
   await saveReport(report);
   await openReport(report.id);
+});
+
+// ---------- School profile: tabs + monthly-photos shortcut ----------
+document.querySelectorAll(".school-tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".school-tab-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("schoolTabVisits").style.display = btn.dataset.tab === "visits" ? "block" : "none";
+    document.getElementById("schoolTabObs").style.display = btn.dataset.tab === "obs" ? "block" : "none";
+  });
+});
+
+document.getElementById("scrollToVisitsTabBtn").addEventListener("click", () => {
+  document.querySelector('.school-tab-btn[data-tab="visits"]').click();
+});
+
+document.getElementById("openSchoolMonthlyBtn").addEventListener("click", async () => {
+  if (!activeSchoolForVisits) return;
+  // These are monthly.js's own state — populate them here too, since this
+  // shortcut can be used without ever visiting the main Monthly Photos
+  // entry point first.
+  monthlySlots = await getMonthlySlots();
+  monthlySchools = await getAllMonthlySchools();
+  if (!currentMonthKey) currentMonthKey = defaultMonthKey();
+  await openSchoolPhotos(activeSchoolForVisits.id);
 });
 
 // ---------- Unlinked visits ----------

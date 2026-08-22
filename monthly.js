@@ -189,7 +189,19 @@ async function renderMonthlySlotsGrid() {
   const grid = document.getElementById("monthlySlotsGrid");
   grid.innerHTML = "";
   const doneCount = Object.keys(activeSubmission.photos || {}).length;
-  document.getElementById("monthlySchoolProgress").textContent = t("monthlyProgress")(doneCount, monthlySlots.length);
+  const total = monthlySlots.length;
+  const isComplete = total > 0 && doneCount === total;
+  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+
+  document.getElementById("monthlySchoolProgress").innerHTML = `
+    <div class="monthly-progress-row">
+      <span>${doneCount} / ${total}</span>
+      <span class="status-badge ${isComplete ? "status-completed" : "status-incomplete"}">
+        ${isComplete ? "🟢 " + t("statusComplete") : "🟠 " + t("statusIncomplete")}
+      </span>
+    </div>
+    <div class="progress-bar-track"><div class="progress-bar-fill ${isComplete ? "" : "warning"}" style="width:${pct}%"></div></div>
+  `;
 
   for (const slot of monthlySlots) {
     const entry = activeSubmission.photos[slot.id];
@@ -328,6 +340,117 @@ document.getElementById("generatePptxBtn").addEventListener("click", async () =>
     showToast(t("pptxGenerated"));
   } catch (err) {
     console.error("PPTX generation failed:", err);
+    showToast(t("pptxGenerateFailed"));
+  } finally {
+    btn.disabled = false;
+    msg.style.display = "none";
+  }
+});
+
+// ---------- Multi-school PowerPoint ----------
+document.getElementById("openMultiSchoolBtn").addEventListener("click", async () => {
+  document.getElementById("multiSchoolMonthLabel").textContent = currentMonthKey;
+
+  const listEl = document.getElementById("multiSchoolCheckList");
+  const emptyEl = document.getElementById("noMultiSchoolsMsg");
+  listEl.innerHTML = "";
+
+  if (monthlySchools.length === 0) {
+    emptyEl.style.display = "block";
+  } else {
+    emptyEl.style.display = "none";
+    for (const school of monthlySchools) {
+      const submission = await getMonthlySubmission(school.id, currentMonthKey);
+      const completeness = computePptxCompleteness(monthlySlots, submission);
+      const row = document.createElement("label");
+      row.className = "multi-school-check-row";
+      row.innerHTML = `
+        <input type="checkbox" class="msc-checkbox" data-id="${school.id}">
+        <div class="msc-info">
+          <h4>${escapeHtml(school.name)}</h4>
+          <p>${completeness.done} / ${completeness.total} ${currentLang === "ar" ? "صورة" : "photos"}</p>
+        </div>
+      `;
+      listEl.appendChild(row);
+    }
+  }
+
+  showScreen("screen-multi-school-select");
+});
+
+document.getElementById("multiSelectAllBtn").addEventListener("click", () => {
+  document.querySelectorAll(".msc-checkbox").forEach((cb) => (cb.checked = true));
+});
+document.getElementById("multiSelectNoneBtn").addEventListener("click", () => {
+  document.querySelectorAll(".msc-checkbox").forEach((cb) => (cb.checked = false));
+});
+
+document.getElementById("multiSchoolBackBtn").addEventListener("click", () => {
+  showScreen("screen-monthly-home");
+});
+
+let multiSelectedSchools = [];
+
+document.getElementById("multiSchoolNextBtn").addEventListener("click", async () => {
+  const checkedIds = Array.from(document.querySelectorAll(".msc-checkbox:checked")).map((cb) => cb.dataset.id);
+  if (checkedIds.length === 0) {
+    showToast(t("multiNeedSelection"));
+    return;
+  }
+  // Order follows the current app/list order (monthlySchools), not
+  // checkbox-click order — matches "استخدم ترتيب المدارس الحالي".
+  multiSelectedSchools = monthlySchools.filter((s) => checkedIds.includes(s.id));
+
+  document.getElementById("multiSummaryMonth").textContent = currentMonthKey;
+  document.getElementById("multiSummarySchoolCount").textContent = multiSelectedSchools.length;
+
+  const perSchoolList = document.getElementById("multiSummaryPerSchoolList");
+  perSchoolList.innerHTML = "";
+  const missingParts = [];
+
+  for (const school of multiSelectedSchools) {
+    const submission = await getMonthlySubmission(school.id, currentMonthKey);
+    const completeness = computePptxCompleteness(monthlySlots, submission);
+    const row = document.createElement("p");
+    row.textContent = `${school.name} — ${completeness.done}/${completeness.total}`;
+    perSchoolList.appendChild(row);
+    if (completeness.missingLabels.length > 0) {
+      missingParts.push(`${school.name}: ${completeness.missingLabels.join("، ")}`);
+    }
+  }
+
+  const missingNote = document.getElementById("multiMissingNote");
+  if (missingParts.length > 0) {
+    missingNote.style.display = "block";
+    missingNote.textContent = t("multiMissingWarning") + " " + missingParts.join(" | ");
+  } else {
+    missingNote.style.display = "none";
+  }
+
+  showScreen("screen-multi-school-summary");
+});
+
+document.getElementById("multiSummaryBackBtn").addEventListener("click", () => {
+  showScreen("screen-multi-school-select");
+});
+
+document.getElementById("generateMultiPptxBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("generateMultiPptxBtn");
+  const msg = document.getElementById("multiPptxGeneratingMsg");
+  btn.disabled = true;
+  msg.style.display = "block";
+  try {
+    const { blob, fileName } = await generateMultiSchoolPptx(multiSelectedSchools, currentMonthKey);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast(t("pptxGenerated"));
+  } catch (err) {
+    console.error("Multi-school PPTX generation failed:", err);
     showToast(t("pptxGenerateFailed"));
   } finally {
     btn.disabled = false;

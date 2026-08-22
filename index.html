@@ -3,25 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>ملاحظاتي</title>
-<link rel="manifest" href="manifest.json?v=16">
+<title>WJ Safety</title>
+<link rel="manifest" href="manifest.json?v=20">
 <meta name="theme-color" content="#1f5e3d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ملاحظاتي">
-<link rel="apple-touch-icon" href="icon.png?v=16">
-<link rel="icon" href="icon.png?v=16">
+<meta name="apple-mobile-web-app-title" content="WJ Safety">
+<link rel="apple-touch-icon" href="icon.png?v=20">
+<link rel="icon" href="icon.png?v=20">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=16">
+<link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
 
   <header class="topbar">
     <button id="topBackBtn" class="top-back-btn" type="button" aria-label="رجوع" style="display:none;">→</button>
-    <h1 data-i18n="appTitle">ملاحظاتي</h1>
+    <div class="brand">
+      <img src="logo-mark.png?v=20" alt="" class="brand-mark">
+      <h1 data-i18n="appTitle">WJ Safety</h1>
+    </div>
     <button id="langToggle" class="lang-btn" type="button">English</button>
   </header>
 
@@ -29,7 +32,10 @@
 
     <!-- SCREEN: Home (Dashboard) -->
     <section id="screen-home" class="screen active">
-      <h2 data-i18n="dashboardHeading">لوحة التحكم</h2>
+      <div class="home-greeting">
+        <p class="home-greeting-time" id="homeGreetingTime"></p>
+        <h2 class="home-greeting-title" data-i18n="dashboardHeading">ملخص عملك اليوم</h2>
+      </div>
 
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-value" id="statSchools">0</div><div class="stat-label" data-i18n="statSchoolsLabel">مدارس</div></div>
@@ -38,16 +44,22 @@
         <div class="stat-card"><div class="stat-value" id="statThisMonth">0</div><div class="stat-label" data-i18n="statMonthLabel">هذا الشهر</div></div>
       </div>
 
-      <button id="quickStartVisitBtn" class="btn btn-primary btn-large" data-i18n="btnQuickStartVisit">+ بدء زيارة</button>
-      <div class="quick-actions-row">
-        <button id="quickSchoolsBtn" class="btn btn-secondary" data-i18n="btnQuickSchools">🏫 المدارس</button>
-        <button id="openMonthlyBtn" class="btn btn-secondary" data-i18n="btnOpenMonthlyShort">📸 الصور الشهرية</button>
-        <button id="quickReportsBtn" class="btn btn-secondary" data-i18n="btnQuickReports">📄 التقارير</button>
+      <button id="quickStartVisitBtn" class="btn btn-primary btn-large btn-cta" data-i18n="btnQuickStartVisit2">＋ زيارة جديدة</button>
+
+      <h3 class="section-heading" data-i18n="quickAccessHeading">الوصول السريع</h3>
+      <div class="quick-access-grid">
+        <button id="quickSchoolsBtn" class="quick-access-tile"><span class="qa-icon">🏫</span><span data-i18n="tileSchools">المدارس</span></button>
+        <button id="openMonthlyBtn" class="quick-access-tile"><span class="qa-icon">📷</span><span data-i18n="tileMonthly">الصور الشهرية</span></button>
+        <button id="quickReportsBtn" class="quick-access-tile"><span class="qa-icon">📄</span><span data-i18n="tileReports">التقارير</span></button>
+        <button id="quickSearchBtn" class="quick-access-tile"><span class="qa-icon">🔍</span><span data-i18n="tileSearch">البحث</span></button>
       </div>
 
-      <h3 class="section-heading" data-i18n="recentVisitsHeading">آخر الزيارات</h3>
+      <h3 class="section-heading" data-i18n="recentVisitsHeading">آخر النشاطات</h3>
       <div id="recentVisitsList"></div>
-      <p id="noRecentVisitsMsg" class="empty-msg" style="display:none;" data-i18n="noRecentVisits">لا توجد زيارات بعد.</p>
+      <div id="noRecentVisitsMsg" class="empty-state" style="display:none;">
+        <div class="empty-state-icon">📋</div>
+        <div class="empty-state-title" data-i18n="noRecentVisits">لا توجد زيارات بعد</div>
+      </div>
 
       <h2 id="schoolsSectionHeading" class="section-heading" data-i18n="schoolsHeading">مدارسي</h2>
 
@@ -59,7 +71,11 @@
       <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="searchSchoolPlaceholder" placeholder="بحث بالمدرسة">
 
       <div id="schoolsHomeList"></div>
-      <p id="noSchoolsMsg" class="empty-msg" data-i18n="noSchoolsHome">لم تتم إضافة أي مدرسة بعد. أضيفي مدرسة للبدء.</p>
+      <div id="noSchoolsMsg" class="empty-state" style="display:none;">
+        <div class="empty-state-icon">🏫</div>
+        <div class="empty-state-title" data-i18n="noSchoolsHomeTitle">لا توجد مدارس بعد</div>
+        <div class="empty-state-sub" data-i18n="noSchoolsHomeSub">أضيفي أول مدرسة من الأعلى للبدء</div>
+      </div>
 
       <button id="viewUnlinkedBtn" class="btn btn-text" style="display:none;"></button>
 
@@ -82,21 +98,77 @@
 
     <!-- SCREEN: School Detail -->
     <section id="screen-school-detail" class="screen">
-      <h2 id="schoolDetailName"></h2>
-      <p id="schoolDetailStats" class="muted"></p>
+      <div class="school-profile-header">
+        <h2 id="schoolDetailName"></h2>
+        <p id="schoolDetailStats" class="muted"></p>
+      </div>
+
+      <div class="school-profile-actions">
+        <button id="startVisitBtn" class="btn btn-primary" data-i18n="btnStartVisit2">＋ زيارة جديدة</button>
+        <button id="openSchoolMonthlyBtn" class="btn btn-secondary" data-i18n="btnSchoolMonthly">📷 الصور الشهرية</button>
+        <button id="scrollToVisitsTabBtn" class="btn btn-secondary" data-i18n="btnSchoolReports">📄 التقارير</button>
+      </div>
+
       <p id="schoolMonthlyStatus" class="monthly-status-line"></p>
+      <button id="openSceneTrackingBtn" class="btn btn-text" data-i18n="btnSceneTracking">📋 متابعة المشاهد</button>
 
-      <button id="startVisitBtn" class="btn btn-primary btn-large" data-i18n="btnStartVisit">🚀 بدء زيارة</button>
+      <div class="school-tabs">
+        <button class="school-tab-btn active" data-tab="visits" data-i18n="tabVisits">سجل الزيارات</button>
+        <button class="school-tab-btn" data-tab="obs" data-i18n="tabObservations">الملاحظات</button>
+      </div>
 
-      <h3 class="section-heading" data-i18n="visitHistoryHeading">سجل الزيارات</h3>
-      <div id="schoolVisitsList"></div>
-      <p id="noSchoolVisitsMsg" class="empty-msg" data-i18n="noSchoolVisits">لا توجد زيارات بعد لهذي المدرسة.</p>
+      <div id="schoolTabVisits" class="school-tab-panel">
+        <div id="schoolVisitsList"></div>
+        <p id="noSchoolVisitsMsg" class="empty-msg" data-i18n="noSchoolVisits">لا توجد زيارات بعد لهذي المدرسة.</p>
+      </div>
 
-      <h3 class="section-heading" data-i18n="schoolObsHistoryHeading">الملاحظات السابقة</h3>
-      <div id="schoolObsHistoryList"></div>
-      <p id="noSchoolObsMsg" class="empty-msg" style="display:none;" data-i18n="noSchoolObs">لا توجد ملاحظات سابقة.</p>
+      <div id="schoolTabObs" class="school-tab-panel" style="display:none;">
+        <div id="schoolObsHistoryList"></div>
+        <p id="noSchoolObsMsg" class="empty-msg" style="display:none;" data-i18n="noSchoolObs">لا توجد ملاحظات سابقة.</p>
+      </div>
 
       <button id="schoolDetailBackBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
+    </section>
+
+    <!-- SCREEN: Scene Tracking (📋 متابعة المشاهد) — reused for both the
+         current month and any historical month; sceneTrackingReturnScreen
+         (JS) controls where the back button goes. -->
+    <section id="screen-scene-tracking" class="screen">
+      <h2 id="sceneTrackingSchoolName"></h2>
+      <p id="sceneTrackingMonthLabel" class="muted"></p>
+
+      <div class="pptx-summary-card">
+        <p>📥 <span data-i18n="sceneStatReceived">تم الاستلام</span>: <strong id="sceneStatReceived">0</strong></p>
+        <p>📤 <span data-i18n="sceneStatSent">أُرسل للمشرف</span>: <strong id="sceneStatSent">0</strong></p>
+        <p>⏳ <span data-i18n="sceneStatNotDone">لم يتم</span>: <strong id="sceneStatNotDone">0</strong></p>
+        <p>📊 <span data-i18n="sceneStatPercent">نسبة الإنجاز</span>: <strong id="sceneStatPercent">0%</strong></p>
+      </div>
+
+      <div id="sceneTrackingList"></div>
+      <p id="noScenesMsg" class="empty-msg" style="display:none;" data-i18n="noScenesYet">لم تتم إضافة أي مشاهد بعد.</p>
+
+      <button id="manageScenesBtn" class="btn btn-text" data-i18n="btnManageScenes">⚙ إدارة قائمة المشاهد</button>
+      <button id="viewSceneHistoryBtn" class="btn btn-text" data-i18n="btnSceneHistory">🗂️ سجل الأشهر السابقة</button>
+      <button id="sceneTrackingBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
+    </section>
+
+    <!-- SCREEN: Scene history list -->
+    <section id="screen-scene-history" class="screen">
+      <h2 data-i18n="sceneHistoryHeading">🗂️ سجل الأشهر السابقة</h2>
+      <div id="sceneHistoryList"></div>
+      <p id="noSceneHistoryMsg" class="empty-msg" style="display:none;" data-i18n="noSceneHistory">لا يوجد سجل سابق بعد.</p>
+      <button id="sceneHistoryBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
+    </section>
+
+    <!-- SCREEN: Manage scenes list -->
+    <section id="screen-scene-template" class="screen">
+      <h2 data-i18n="manageScenesHeading">إدارة قائمة المشاهد</h2>
+      <div class="add-school-row">
+        <input type="text" id="newSceneNameInput" data-i18n-placeholder="newScenePlaceholder" placeholder="اسم مشهد جديد">
+        <button type="button" id="addSceneBtn" class="btn btn-primary">+</button>
+      </div>
+      <div id="sceneTemplateList"></div>
+      <button id="sceneTemplateBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
     </section>
 
     <!-- SCREEN: Unlinked Visits (reports whose location doesn't match a saved school) -->
@@ -179,45 +251,50 @@
     <section id="screen-observation" class="screen">
       <h2 id="observationHeading" data-i18n="observationHeading">الملاحظة</h2>
 
-      <h3 class="section-heading" data-i18n="photoHeading">الصور</h3>
-      <div id="photosGrid" class="photos-grid"></div>
-      <div id="photoButtons" class="action-row">
-        <button type="button" id="takePhotoBtn" class="btn btn-secondary" data-i18n="btnTakePhoto">📷 تصوير الملاحظة</button>
-        <button type="button" id="pickPhotoBtn" class="btn btn-secondary" data-i18n="btnPickPhoto">اختيار من الصور</button>
+      <div class="field-section">
+        <h3 class="section-heading" data-i18n="photoHeading">الصور</h3>
+        <div id="photosGrid" class="photos-grid"></div>
+        <button type="button" id="takePhotoBtn" class="btn btn-primary btn-large btn-cta" data-i18n="btnTakePhoto2">📷 إضافة صورة</button>
+        <button type="button" id="pickPhotoBtn" class="btn btn-text" data-i18n="btnPickPhoto">اختيار من الصور</button>
+        <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
+        <input type="file" id="galleryInput" accept="image/*" multiple hidden>
       </div>
-      <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
-      <input type="file" id="galleryInput" accept="image/*" multiple hidden>
 
-      <h3 class="section-heading" data-i18n="voiceHeading">الملاحظة الصوتية</h3>
-      <div id="recordingStatus" class="recording-status" style="display:none;">
-        <span class="rec-dot"></span>
-        <span data-i18n="recording">جاري التسجيل</span>
-        <span id="recordTimer">00:00</span>
-      </div>
-      <button type="button" id="recordBtn" class="btn btn-secondary btn-large" data-i18n="btnRecord">🎙️ تسجيل</button>
-
-      <div id="audioPlaybackBox" style="display:none;">
-        <audio id="audioPlayback" controls></audio>
-        <div class="action-row">
-          <button type="button" id="deleteAudioBtn" class="btn btn-danger-outline" data-i18n="btnDeleteAudio">🗑 حذف التسجيل</button>
-          <button type="button" id="reRecordBtn" class="btn btn-secondary" data-i18n="btnReRecord">🎙 تسجيل مرة أخرى</button>
+      <div class="field-section">
+        <h3 class="section-heading" data-i18n="voiceHeading">الملاحظة الصوتية</h3>
+        <div id="recordingStatus" class="recording-status" style="display:none;">
+          <span class="rec-dot"></span>
+          <span data-i18n="recording">جاري التسجيل</span>
+          <span id="recordTimer">00:00</span>
         </div>
-        <button type="button" id="transcribeBtn" class="btn btn-primary" data-i18n="btnTranscribe">تحويل إلى نص</button>
+        <button type="button" id="recordBtn" class="btn btn-secondary btn-large" data-i18n="btnRecord">🎙️ اضغطي وتكلمي</button>
+
+        <div id="audioPlaybackBox" style="display:none;">
+          <audio id="audioPlayback" controls></audio>
+          <div class="action-row">
+            <button type="button" id="deleteAudioBtn" class="btn btn-danger-outline" data-i18n="btnDeleteAudio">🗑 حذف التسجيل</button>
+            <button type="button" id="reRecordBtn" class="btn btn-secondary" data-i18n="btnReRecord">🎙 تسجيل مرة أخرى</button>
+          </div>
+          <button type="button" id="transcribeBtn" class="btn btn-primary" data-i18n="btnTranscribe">تحويل إلى نص</button>
+        </div>
       </div>
 
-      <h3 class="section-heading" data-i18n="spotLocationHeading">موقع الملاحظة</h3>
-      <input type="text" id="observationSpotLocation" data-i18n-placeholder="spotLocationPlaceholder" placeholder="مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني">
+      <div class="field-section">
+        <h3 class="section-heading" data-i18n="textHeading">نص الملاحظة</h3>
+        <textarea id="observationText" rows="5" data-i18n-placeholder="observationTextPlaceholder" placeholder="اكتب أو سجّل الملاحظة هنا"></textarea>
+        <button type="button" id="analyzeAIBtn" class="btn btn-secondary" data-i18n="btnAnalyzeAI">✨ تحليل الملاحظة (AI)</button>
+        <p id="aiAnalyzingMsg" class="muted" style="display:none;" data-i18n="aiAnalyzing">⏳ جاري التحليل...</p>
+      </div>
 
-      <h3 class="section-heading" data-i18n="manualCategoryHeading">التصنيف (اختياري)</h3>
-      <select id="observationCategorySelect"></select>
+      <div class="field-section">
+        <h3 class="section-heading" data-i18n="manualCategoryHeading">التصنيف (اختياري)</h3>
+        <select id="observationCategorySelect"></select>
 
-      <h3 class="section-heading" data-i18n="textHeading">نص الملاحظة</h3>
-      <textarea id="observationText" rows="5" data-i18n-placeholder="observationTextPlaceholder" placeholder="اكتب أو سجّل الملاحظة هنا"></textarea>
+        <h3 class="section-heading" data-i18n="spotLocationHeading">موقع الملاحظة</h3>
+        <input type="text" id="observationSpotLocation" data-i18n-placeholder="spotLocationPlaceholder" placeholder="مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني">
+      </div>
 
-      <button type="button" id="analyzeAIBtn" class="btn btn-secondary btn-large" data-i18n="btnAnalyzeAI">✨ تحليل الملاحظة (AI)</button>
-      <p id="aiAnalyzingMsg" class="muted" style="display:none;" data-i18n="aiAnalyzing">⏳ جاري التحليل...</p>
-
-      <button type="button" id="saveObservationBtn" class="btn btn-primary btn-large" data-i18n="btnSaveObservation">حفظ الملاحظة</button>
+      <button type="button" id="saveObservationBtn" class="btn btn-primary btn-large btn-cta" data-i18n="btnSaveObservation">حفظ الملاحظة</button>
       <button type="button" id="cancelObservationBtn" class="btn btn-text" data-i18n="btnCancel">إلغاء</button>
     </section>
 
@@ -302,8 +379,44 @@
       <div id="monthlySchoolsList"></div>
       <p id="noMonthlySchoolsMsg" class="empty-msg" data-i18n="monthlyNoSchools">لم تتم إضافة أي مدرسة بعد.</p>
 
+      <button id="openMultiSchoolBtn" class="btn btn-secondary btn-large" data-i18n="btnMultiSchool">🖥️ تجميع تقارير المدارس</button>
       <button id="monthlyTemplateSettingsBtn" class="btn btn-text" data-i18n="btnMonthlyTemplateSettings">⚙ إدارة قائمة الصور المطلوبة</button>
       <button id="monthlyBackHomeBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
+    </section>
+
+    <!-- SCREEN: Multi-school selection -->
+    <section id="screen-multi-school-select" class="screen">
+      <h2 data-i18n="multiSchoolSelectHeading">اختيار المدارس</h2>
+      <p id="multiSchoolMonthLabel" class="muted"></p>
+
+      <div class="action-row">
+        <button id="multiSelectAllBtn" class="btn btn-text" data-i18n="btnSelectAll">تحديد الكل</button>
+        <button id="multiSelectNoneBtn" class="btn btn-text" data-i18n="btnSelectNone">إلغاء تحديد الكل</button>
+      </div>
+
+      <div id="multiSchoolCheckList"></div>
+      <p id="noMultiSchoolsMsg" class="empty-msg" style="display:none;" data-i18n="monthlyNoSchools">لم تتم إضافة أي مدرسة بعد.</p>
+
+      <button id="multiSchoolNextBtn" class="btn btn-primary btn-large" data-i18n="btnNext">التالي</button>
+      <button id="multiSchoolBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
+    </section>
+
+    <!-- SCREEN: Multi-school summary -->
+    <section id="screen-multi-school-summary" class="screen">
+      <h2 data-i18n="pptxSummaryHeading">ملخص قبل التوليد</h2>
+
+      <div class="pptx-summary-card">
+        <p><strong data-i18n="pptxSummaryMonth">الشهر:</strong> <span id="multiSummaryMonth"></span></p>
+        <p><strong data-i18n="multiSummarySchoolsCount">المدارس المحددة:</strong> <span id="multiSummarySchoolCount"></span></p>
+      </div>
+
+      <div id="multiSummaryPerSchoolList"></div>
+
+      <p id="multiMissingNote" class="previous-visit-note" style="display:none;"></p>
+
+      <button id="generateMultiPptxBtn" class="btn btn-primary btn-large" data-i18n="btnGeneratePptxConfirm">توليد PowerPoint</button>
+      <p id="multiPptxGeneratingMsg" class="muted" style="display:none;" data-i18n="pptxGenerating">⏳ جاري التوليد...</p>
+      <button id="multiSummaryBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
     </section>
 
     <!-- SCREEN: Monthly Template Settings -->
@@ -325,7 +438,7 @@
         <span data-i18n="monthlyVisitDateLabel">تاريخ الزيارة</span>
         <input type="date" id="monthlyVisitDateInput">
       </label>
-      <p id="monthlySchoolProgress" class="muted"></p>
+      <div id="monthlySchoolProgress" class="muted"></div>
 
       <div id="monthlySlotsGrid" class="monthly-slots-grid"></div>
 
@@ -375,12 +488,13 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="storage.js?v=16"></script>
-  <script src="media.js?v=16"></script>
-  <script src="photodoc.js?v=16"></script>
-  <script src="pdf.js?v=16"></script>
-  <script src="pptx.js?v=16"></script>
-  <script src="app.js?v=16"></script>
-  <script src="monthly.js?v=16"></script>
+  <script src="storage.js?v=20"></script>
+  <script src="media.js?v=20"></script>
+  <script src="photodoc.js?v=20"></script>
+  <script src="pdf.js?v=20"></script>
+  <script src="pptx.js?v=20"></script>
+  <script src="app.js?v=20"></script>
+  <script src="scenes.js?v=20"></script>
+  <script src="monthly.js?v=20"></script>
 </body>
 </html>

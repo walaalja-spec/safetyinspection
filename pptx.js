@@ -73,12 +73,47 @@ const SCHOOL_NAME_SEARCH =
 
 const DATE_SEARCH = " 2026/3/16 الى 2026/4/15";
 
+// Exact original XML text for the report title's month name — single
+// run, so this is a plain, safe string replacement (same font/size/
+// color/position, only the word inside the parentheses changes).
+const TITLE_SEARCH = "<a:t>تقرير مشهد الإنجاز الشهري (مارس)</a:t>";
+
+const ARABIC_MONTH_NAMES = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+];
+
+function monthKeyToArabicName(monthKey) {
+  const month = Number(monthKey.split("-")[1]); // 1-12
+  return ARABIC_MONTH_NAMES[month - 1] || monthKey;
+}
+
 function xmlEscape(str) {
   return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// The school-name shape is a fixed-width box (wrap="square" + spAutoFit
+// — it wraps and grows TALLER for long text, it doesn't shrink to fit).
+// Its neighbors sit at fixed Y positions with no reactive layout, so
+// any wrap to a 2nd line visually collides with the shape above it.
+//
+// A pixel-precise fit check would need the real Tajawal font loaded,
+// which isn't guaranteed (offline use, slow connections) — so instead
+// we use a fixed, conservative character budget calibrated against the
+// template's own original example text (~51 characters incl. parens,
+// which fits on one line without collision) and truncate with an
+// ellipsis beyond that. This never touches the box's size, position,
+// or font — only the text length.
+const SCHOOL_NAME_MAX_CHARS = 40;
+
+function truncateSchoolNameToFit(name) {
+  const trimmed = (name || "").trim();
+  if (trimmed.length <= SCHOOL_NAME_MAX_CHARS) return `(${trimmed})`;
+  return `(${trimmed.slice(0, SCHOOL_NAME_MAX_CHARS).trim()}…)`;
 }
 
 // For monthKey "YYYY-MM": the reporting period is the 16th of that
@@ -161,6 +196,42 @@ function computePptxCompleteness(slots, submission) {
   return { total, done, missingLabels };
 }
 
+// Shared by both the single-school and multi-school paths — applies the
+// same 3 text replacements (school name, date range, month in title) to
+// a slide's XML string. Used verbatim by generateMonthlyPptx() so its
+// single-school output is unaffected by this refactor.
+function applySlideTextReplacements(slideXml, school, monthKey) {
+  if (slideXml.includes(SCHOOL_NAME_SEARCH)) {
+    const safeName = truncateSchoolNameToFit(school.name);
+    const replacement = SCHOOL_NAME_SEARCH.replace(
+      '<a:t>( تحفيظ القرآن الكريم الابتدائية و المتوسطة </a:t>',
+      `<a:t>${xmlEscape(safeName)}</a:t>`
+    )
+      .replace("<a:t>ببطحان</a:t>", "<a:t></a:t>")
+      .replace(/<a:t>\)<\/a:t>$/, "<a:t></a:t>");
+    slideXml = slideXml.replace(SCHOOL_NAME_SEARCH, replacement);
+  } else {
+    console.warn("PPTX: school-name marker text not found — name not updated. Template may have changed.");
+  }
+
+  const { start, end } = monthKeyToReportRange(monthKey);
+  const fmt = (d) => `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+  if (slideXml.includes(DATE_SEARCH)) {
+    slideXml = slideXml.replace(DATE_SEARCH, ` ${fmt(start)} الى ${fmt(end)}`);
+  } else {
+    console.warn("PPTX: date marker text not found — date not updated. Template may have changed.");
+  }
+
+  if (slideXml.includes(TITLE_SEARCH)) {
+    const monthName = monthKeyToArabicName(monthKey);
+    slideXml = slideXml.replace(TITLE_SEARCH, `<a:t>تقرير مشهد الإنجاز الشهري (${xmlEscape(monthName)})</a:t>`);
+  } else {
+    console.warn("PPTX: title month marker text not found — title not updated. Template may have changed.");
+  }
+
+  return slideXml;
+}
+
 async function generateMonthlyPptx(school, monthKey) {
   const [slots, submission, templateResp] = await Promise.all([
     getMonthlySlots(),
@@ -190,32 +261,170 @@ async function generateMonthlyPptx(school, monthKey) {
   // 2) Replace the two text fields, in the slide XML.
   const slidePath = "ppt/slides/slide1.xml";
   let slideXml = await zip.file(slidePath).async("string");
-
-  if (slideXml.includes(SCHOOL_NAME_SEARCH)) {
-    const replacement = SCHOOL_NAME_SEARCH.replace(
-      '<a:t>( تحفيظ القرآن الكريم الابتدائية و المتوسطة </a:t>',
-      `<a:t>(${xmlEscape(school.name)})</a:t>`
-    )
-      .replace("<a:t>ببطحان</a:t>", "<a:t></a:t>")
-      .replace(/<a:t>\)<\/a:t>$/, "<a:t></a:t>");
-    slideXml = slideXml.replace(SCHOOL_NAME_SEARCH, replacement);
-  } else {
-    console.warn("PPTX: school-name marker text not found — name not updated. Template may have changed.");
-  }
-
-  const { start, end } = monthKeyToReportRange(monthKey);
-  const fmt = (d) => `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
-  if (slideXml.includes(DATE_SEARCH)) {
-    slideXml = slideXml.replace(DATE_SEARCH, ` ${fmt(start)} الى ${fmt(end)}`);
-  } else {
-    console.warn("PPTX: date marker text not found — date not updated. Template may have changed.");
-  }
-
+  slideXml = await applySlideTextReplacements(slideXml, school, monthKey);
   zip.file(slidePath, slideXml);
 
   const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
 
   const monthLabel = monthKey; // "YYYY-MM" — kept simple/unambiguous in the filename
   const fileName = `التقرير المصور - ${sanitizeFileNamePart(school.name)} - ${monthLabel}.pptx`;
+  return { blob, fileName };
+}
+
+// ---------------------------------------------------------------------
+// Multi-school export — combines several schools' single-slide reports
+// into one .pptx, one slide per school, same template/design for each.
+//
+// This does NOT touch generateMonthlyPptx() above or call it internally
+// for the multi-school path (except the explicit 1-school passthrough
+// below) — it duplicates the template's slide part at the ZIP/XML level
+// (new slideN.xml + slideN.xml.rels + registrations in
+// [Content_Types].xml, presentation.xml, and presentation.xml.rels),
+// reusing the same per-school helpers (applySlideTextReplacements,
+// cropImageToRatio, PPTX_IMAGE_MAP) as the single-school path so both
+// stay visually identical per-school.
+// ---------------------------------------------------------------------
+
+// Replaces one specific media Target (by filename) inside a slide rels
+// XML string. Each image filename appears as exactly one Target value
+// in the template's rels file, so this is a safe, unique match.
+function repointRelsTarget(relsXml, mediaFileName, newTarget) {
+  const search = `Target="../media/${mediaFileName}"`;
+  const replacement = `Target="${newTarget}"`;
+  if (!relsXml.includes(search)) {
+    console.warn(`PPTX: relationship target for ${mediaFileName} not found — leaving unchanged.`);
+    return relsXml;
+  }
+  return relsXml.replace(search, replacement);
+}
+
+// Every duplicated slide needs its OWN notes-slide part — the template's
+// notesSlide1.xml.rels contains a back-reference to its parent slide
+// (Target="../slides/slide1.xml"), so sharing one notes part across
+// multiple slides leaves that back-reference ambiguous. Cheap to just
+// duplicate (notes content itself isn't school-specific).
+async function duplicateNotesSlideForSlide(zip, originalNotesXml, originalNotesRelsXml, slideNum) {
+  const notesPath = `ppt/notesSlides/notesSlide${slideNum}.xml`;
+  const notesRelsPath = `ppt/notesSlides/_rels/notesSlide${slideNum}.xml.rels`;
+  const newNotesRels = originalNotesRelsXml.replace(
+    'Target="../slides/slide1.xml"',
+    `Target="../slides/slide${slideNum}.xml"`
+  );
+  zip.file(notesPath, originalNotesXml);
+  zip.file(notesRelsPath, newNotesRels);
+  return `../notesSlides/notesSlide${slideNum}.xml`;
+}
+
+async function generateMultiSchoolPptx(schools, monthKey) {
+  if (!Array.isArray(schools) || schools.length === 0) throw new Error("no_schools_selected");
+  if (schools.length === 1) return generateMonthlyPptx(schools[0], monthKey); // identical single-school path
+
+  const [slots, templateResp] = await Promise.all([getMonthlySlots(), fetch(PPTX_TEMPLATE_PATH)]);
+  if (!templateResp.ok) throw new Error("template_fetch_failed");
+  const templateBuffer = await templateResp.arrayBuffer();
+  const zip = await JSZip.loadAsync(templateBuffer);
+
+  const originalSlideXml = await zip.file("ppt/slides/slide1.xml").async("string");
+  const originalSlideRelsXml = await zip.file("ppt/slides/_rels/slide1.xml.rels").async("string");
+  const originalNotesXml = await zip.file("ppt/notesSlides/notesSlide1.xml").async("string");
+  const originalNotesRelsXml = await zip.file("ppt/notesSlides/_rels/notesSlide1.xml.rels").async("string");
+
+  let contentTypesXml = await zip.file("[Content_Types].xml").async("string");
+  let presRelsXml = await zip.file("ppt/_rels/presentation.xml.rels").async("string");
+  let presXml = await zip.file("ppt/presentation.xml").async("string");
+
+  // Next free relationship id in presentation.xml.rels (rIdN, N numeric).
+  let nextRidNum = Math.max(...Array.from(presRelsXml.matchAll(/Id="rId(\d+)"/g), (m) => Number(m[1]))) + 1;
+  // Next free <p:sldId id="..."> value in the slide list.
+  let nextSldId = Math.max(...Array.from(presXml.matchAll(/<p:sldId id="(\d+)"/g), (m) => Number(m[1]))) + 1;
+
+  const sldIdAdditions = [];
+  const finalSlideRels = []; // collected to compute which original media ends up truly unreferenced
+
+  for (let i = 0; i < schools.length; i++) {
+    const school = schools[i];
+    const submission = await getMonthlySubmission(school.id, monthKey);
+    const byLabel = groupFilledSlotsByLabel(slots, submission);
+
+    let slideXml = await applySlideTextReplacements(originalSlideXml, school, monthKey);
+    let slideRelsXml = originalSlideRelsXml;
+
+    // Photos: only slots THIS school actually filled get a new,
+    // school-specific media file; everything else keeps pointing at
+    // the one shared original template image — never another school's.
+    for (const [label, targets] of Object.entries(PPTX_IMAGE_MAP)) {
+      const filled = byLabel[label] || [];
+      for (let t = 0; t < targets.length; t++) {
+        const filledEntry = filled[t];
+        if (!filledEntry) continue;
+        const target = targets[t];
+        const cropped = await cropImageToRatio(filledEntry.entry.blob, target.ratio);
+        const arrayBuf = await cropped.arrayBuffer();
+        const newMediaPath = `ppt/media/s${i}_${target.media}`;
+        zip.file(newMediaPath, arrayBuf);
+        slideRelsXml = repointRelsTarget(slideRelsXml, target.media, `../media/s${i}_${target.media}`);
+      }
+    }
+
+    if (i === 0) {
+      // First school reuses slide1.xml in place — exactly the same
+      // part the single-school path writes to. Its notes slide (and
+      // notes-slide back-reference) already correctly point to slide1.
+      zip.file("ppt/slides/slide1.xml", slideXml);
+      zip.file("ppt/slides/_rels/slide1.xml.rels", slideRelsXml);
+    } else {
+      const slideNum = i + 1;
+
+      // Give this slide its own notes-slide part (see function doc)
+      // and repoint its own notes-slide relationship to it.
+      const newNotesTarget = await duplicateNotesSlideForSlide(zip, originalNotesXml, originalNotesRelsXml, slideNum);
+      slideRelsXml = slideRelsXml.replace('Target="../notesSlides/notesSlide1.xml"', `Target="${newNotesTarget}"`);
+      contentTypesXml = contentTypesXml.replace(
+        "</Types>",
+        `<Override PartName="/ppt/notesSlides/notesSlide${slideNum}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/></Types>`
+      );
+
+      zip.file(`ppt/slides/slide${slideNum}.xml`, slideXml);
+      zip.file(`ppt/slides/_rels/slide${slideNum}.xml.rels`, slideRelsXml);
+
+      contentTypesXml = contentTypesXml.replace(
+        "</Types>",
+        `<Override PartName="/ppt/slides/slide${slideNum}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`
+      );
+
+      const rid = `rId${nextRidNum++}`;
+      presRelsXml = presRelsXml.replace(
+        "</Relationships>",
+        `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${slideNum}.xml"/></Relationships>`
+      );
+
+      sldIdAdditions.push(`<p:sldId id="${nextSldId++}" r:id="${rid}"/>`);
+    }
+
+    finalSlideRels.push(slideRelsXml);
+  }
+
+  presXml = presXml.replace("</p:sldIdLst>", sldIdAdditions.join("") + "</p:sldIdLst>");
+
+  zip.file("[Content_Types].xml", contentTypesXml);
+  zip.file("ppt/_rels/presentation.xml.rels", presRelsXml);
+  zip.file("ppt/presentation.xml", presXml);
+
+  // Clean up: any of the 15 original template photos that ended up
+  // replaced on EVERY slide that could reference it is now genuinely
+  // unreferenced dead weight in the package — remove it (this is what
+  // the validator flags as "Unreferenced file").
+  const allMediaFiles = Object.values(PPTX_IMAGE_MAP).flat().map((t) => t.media);
+  for (const mediaFile of allMediaFiles) {
+    const stillReferenced = finalSlideRels.some((rels) => rels.includes(`Target="../media/${mediaFile}"`));
+    if (!stillReferenced) {
+      zip.remove(`ppt/media/${mediaFile}`);
+    }
+  }
+
+  const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
+
+  const monthName = monthKeyToArabicName(monthKey);
+  const fileName = `التقرير المصور للصيانة - ${monthName} ${monthKey.split("-")[0]} - جميع المدارس.pptx`;
   return { blob, fileName };
 }
