@@ -234,11 +234,13 @@ function measureObservationHeight(ctx, obs, width) {
     photoBlockH = rows * (cellSize + 10);
   }
 
+  const spotBlockH = obs.spotLocation ? 26 : 0;
+
   ctx.font = `${TEXT_LINE_HEIGHT - 8}px Geeza Pro, Cairo, Arial, sans-serif`;
   const lines = wrapText(ctx, obs.text || "", width - TEXT_PADDING * 2 - 14);
   const naturalTextH = lines.length * TEXT_LINE_HEIGHT + TEXT_PADDING * 2;
 
-  const naturalTotal = BADGE_ROW_H + photoBlockH + naturalTextH;
+  const naturalTotal = BADGE_ROW_H + photoBlockH + spotBlockH + naturalTextH;
   return { height: Math.min(naturalTotal, MAX_ROW_HEIGHT), lineCount: lines.length };
 }
 
@@ -263,6 +265,23 @@ async function drawObservationSlot(ctx, report, obs, obsNumber, x, y, w, h, isRt
   ctx.textAlign = isRtl ? "right" : "left";
   const headingX = isRtl ? badgeX - 15 : badgeX + badgeSize + 15;
   ctx.fillText((lang === "ar" ? "ملاحظة رقم " : "Observation #") + obsNumber, headingX, badgeCy + 7);
+
+  // Category tag on the opposite end of the heading row, if present
+  if (obs.category) {
+    ctx.font = "700 16px Geeza Pro, Cairo, Arial, sans-serif";
+    const catText = obs.category;
+    const catPaddingX = 10;
+    const catW = ctx.measureText(catText).width + catPaddingX * 2;
+    const catH = 24;
+    const catX = isRtl ? x : x + w - catW;
+    const catY = badgeCy - catH / 2;
+    ctx.fillStyle = PDF_COLORS.primaryLight;
+    roundRectPath(ctx, catX, catY, catW, catH, catH / 2);
+    ctx.fill();
+    ctx.fillStyle = PDF_COLORS.primary;
+    ctx.textAlign = "center";
+    ctx.fillText(catText, catX + catW / 2, catY + catH / 2 + 5);
+  }
 
   let cursorY = y + BADGE_ROW_H;
 
@@ -295,6 +314,16 @@ async function drawObservationSlot(ctx, report, obs, obsNumber, x, y, w, h, isRt
     cursorY += rows * (cellSize + gap);
   } else {
     cursorY += 6;
+  }
+
+  if (obs.spotLocation) {
+    ctx.font = "700 18px Geeza Pro, Cairo, Arial, sans-serif";
+    ctx.fillStyle = PDF_COLORS.primary;
+    ctx.direction = isRtl ? "rtl" : "ltr";
+    ctx.textAlign = isRtl ? "right" : "left";
+    const spotX = isRtl ? x + w : x;
+    ctx.fillText("📍 " + obs.spotLocation, spotX, cursorY + 14);
+    cursorY += 26;
   }
 
   const textCardH = Math.max(44, y + h - cursorY);

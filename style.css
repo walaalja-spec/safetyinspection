@@ -212,12 +212,9 @@ input:focus, textarea:focus, button:focus-visible {
   display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;
 }
 .ai-badge-category { background: var(--color-primary-light); color: var(--color-primary); }
-.ai-badge-priority { background: #eef1f4; color: #3b4a5c; }
-.ai-risk-low { background: #e5f5ea; color: #1f7a3d; }
-.ai-risk-medium { background: #fff3cd; color: #7a5c00; }
-.ai-risk-high { background: #ffe4d6; color: #a34a12; }
-.ai-risk-critical { background: #fbeceb; color: var(--color-danger); }
+.ai-badge-pending { background: #fff3cd; color: #7a5c00; }
 .obs-action { font-size: 0.85rem; color: var(--color-muted); margin: 0 0 10px 0; }
+.obs-spot { font-size: 0.85rem; color: var(--color-text); font-weight: 700; margin: 0 0 6px 0; }
 
 /* ---------- Monthly required photos ---------- */
 .add-school-row { display: flex; gap: 8px; margin-bottom: 14px; }

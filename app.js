@@ -149,11 +149,18 @@ const translations = {
     aiReviewHeading: "مراجعة الملاحظة (AI)",
     aiCategoryLabel: "التصنيف",
     aiDescriptionLabel: "الوصف",
-    aiRiskLabel: "الخطورة المقترحة",
     aiActionLabel: "الإجراء المقترح",
-    aiPriorityLabel: "الأولوية",
     aiConfidenceLabel: (pct) => `مستوى ثقة AI: ${pct}%`,
-    btnApproveAI: "✅ اعتماد وحفظ"
+    btnApproveAI: "✅ اعتماد وحفظ",
+    spotLocationHeading: "موقع الملاحظة",
+    spotLocationPlaceholder: "مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني",
+    needSpotLocation: "الرجاء كتابة موقع الملاحظة.",
+    obsSpotLabel: "الموقع",
+    pendingAIBadge: "⏳ بانتظار التحليل",
+    btnAnalyzePending: "🔄 تحليل كل الملاحظات المعلقة",
+    offlineAnalyzeSaved: "📴 لا يوجد اتصال — تم حفظ الملاحظة وستُحلَّل لاحقًا.",
+    analyzingPendingProgress: (i, n) => `⏳ جاري التحليل (${i}/${n})...`,
+    analyzingPendingDone: (ok, total) => `تم تحليل ${ok} من ${total} ملاحظة معلّقة.`
   },
   en: {
     appTitle: "My Observations",
@@ -287,11 +294,18 @@ const translations = {
     aiReviewHeading: "Review Note (AI)",
     aiCategoryLabel: "Category",
     aiDescriptionLabel: "Description",
-    aiRiskLabel: "Suggested Risk Level",
     aiActionLabel: "Recommended Action",
-    aiPriorityLabel: "Priority",
     aiConfidenceLabel: (pct) => `AI confidence: ${pct}%`,
-    btnApproveAI: "✅ Approve & Save"
+    btnApproveAI: "✅ Approve & Save",
+    spotLocationHeading: "Observation Location",
+    spotLocationPlaceholder: "e.g. Classroom 3B - next to the whiteboard, or Teachers' Room - 2nd floor",
+    needSpotLocation: "Please enter the observation location.",
+    obsSpotLabel: "Location",
+    pendingAIBadge: "⏳ Pending analysis",
+    btnAnalyzePending: "🔄 Analyze All Pending Notes",
+    offlineAnalyzeSaved: "📴 No connection — the note was saved and will be analyzed later.",
+    analyzingPendingProgress: (i, n) => `⏳ Analyzing (${i}/${n})...`,
+    analyzingPendingDone: (ok, total) => `Analyzed ${ok} of ${total} pending notes.`
   }
 };
 
@@ -660,21 +674,12 @@ function thumbUrl(blob) {
   return blob ? URL.createObjectURL(blob) : null;
 }
 
-function riskLevelClass(riskLevel) {
-  const map = {
-    "منخفضة": "ai-risk-low",
-    "متوسطة": "ai-risk-medium",
-    "عالية": "ai-risk-high",
-    "حرجة": "ai-risk-critical"
-  };
-  return map[riskLevel] || "ai-risk-medium";
-}
-
 async function renderReportScreen() {
   document.getElementById("reportSummaryTitle").textContent = activeReport.title;
   document.getElementById("reportSummaryMeta").textContent = `${activeReport.location} — ${activeReport.date}`;
 
   await renderPreviousVisitNote();
+  updatePendingAIButton();
 
   const listEl = document.getElementById("observationsList");
   const emptyEl = document.getElementById("noObservationsMsg");
@@ -695,12 +700,10 @@ async function renderReportScreen() {
       const repeatBadge = repeatInfo
         ? `<span class="repeat-badge">${t("repeatedFrom")(repeatInfo)}</span>`
         : "";
-      const riskClass = obs.riskLevel ? riskLevelClass(obs.riskLevel) : "";
-      const aiBadges = obs.category
+      const aiBadges = obs.category || obs.pendingAI
         ? `<div class="ai-badges">
-             <span class="ai-badge ai-badge-category">${escapeHtml(obs.category)}</span>
-             ${obs.riskLevel ? `<span class="ai-badge ${riskClass}">${escapeHtml(obs.riskLevel)}</span>` : ""}
-             ${obs.priority ? `<span class="ai-badge ai-badge-priority">${escapeHtml(obs.priority)}</span>` : ""}
+             ${obs.category ? `<span class="ai-badge ai-badge-category">${escapeHtml(obs.category)}</span>` : ""}
+             ${obs.pendingAI ? `<span class="ai-badge ai-badge-pending">${t("pendingAIBadge")}</span>` : ""}
            </div>`
         : "";
       card.innerHTML = `
@@ -708,6 +711,7 @@ async function renderReportScreen() {
         ${repeatBadge}
         ${aiBadges}
         ${thumbsHtml}
+        <p class="obs-spot">📍 ${escapeHtml(obs.spotLocation || "")}</p>
         <p class="obs-text">${escapeHtml(obs.text)}</p>
         ${obs.recommendedAction ? `<p class="obs-action"><strong>${t("aiActionLabel")}:</strong> ${escapeHtml(obs.recommendedAction)}</p>` : ""}
         <div class="card-actions">
@@ -806,6 +810,7 @@ function resetObservationForm() {
   document.getElementById("audioPlaybackBox").style.display = "none";
   document.getElementById("recordingStatus").style.display = "none";
   document.getElementById("observationText").value = "";
+  document.getElementById("observationSpotLocation").value = "";
   document.getElementById("recordBtn").textContent = t("btnRecord");
   document.getElementById("cameraInput").value = "";
   document.getElementById("galleryInput").value = "";
@@ -823,6 +828,7 @@ function openObservationEditor(index) {
   if (index !== null) {
     const obs = activeReport.observations[index];
     document.getElementById("observationText").value = obs.text || "";
+    document.getElementById("observationSpotLocation").value = obs.spotLocation || "";
     stagedPhotos = [...obsPhotos(obs)];
     renderPhotosGrid();
     if (obs.audioBlob) {
@@ -832,10 +838,11 @@ function openObservationEditor(index) {
     if (obs.category) {
       editingAIFields = {
         category: obs.category,
-        riskLevel: obs.riskLevel,
-        recommendedAction: obs.recommendedAction,
-        priority: obs.priority
+        recommendedAction: obs.recommendedAction
       };
+    }
+    if (obs.pendingAI) {
+      editingAIFields.pendingAI = true;
     }
   }
 
@@ -1052,32 +1059,70 @@ document.getElementById("transcribeBtn").addEventListener("click", () => {
 });
 
 // ---- Save observation ----
+// ---------- Optimistic, resilient observation saving ----------
+// storage.js already retries a failed IndexedDB write 3x internally.
+// If it still fails (rare), we queue the report and keep retrying in
+// the background instead of ever blocking the user or showing a dead-end
+// failure message — the UI has already moved on by the time this runs.
+const pendingSaveQueue = new Map(); // reportId -> report object awaiting a successful DB write
+
+async function persistReportResilient(report) {
+  try {
+    await saveReport(report);
+    pendingSaveQueue.delete(report.id);
+    return true;
+  } catch (err) {
+    console.error("Persist failed after internal retries, queued for background retry:", err);
+    pendingSaveQueue.set(report.id, report);
+    return false;
+  }
+}
+
+async function flushPendingSaves() {
+  if (pendingSaveQueue.size === 0) return;
+  for (const [id, report] of Array.from(pendingSaveQueue.entries())) {
+    await persistReportResilient(report);
+  }
+}
+setInterval(flushPendingSaves, 15000);
+window.addEventListener("online", flushPendingSaves);
+
 async function saveCurrentObservation(extraFields) {
   const text = document.getElementById("observationText").value.trim();
   if (!text) {
     showToast(t("needText"));
     return false;
   }
-  const obs = { text, photos: stagedPhotos, audioBlob: stagedAudioBlob || null, ...editingAIFields, ...(extraFields || {}) };
-
-  try {
-    if (editingIndex !== null) {
-      activeReport.observations[editingIndex] = obs;
-    } else {
-      activeReport.observations.push(obs);
-    }
-    await saveReport(activeReport);
-    showToast(t("observationSaved"));
-    await renderReportScreen();
-    showScreen("screen-report");
-    return true;
-  } catch (err) {
-    console.error("Failed to save observation:", err);
-    showToast(currentLang === "ar"
-      ? "تعذر حفظ الملاحظة. حاول مرة أخرى."
-      : "Couldn't save the observation. Please try again.");
+  const spotLocation = document.getElementById("observationSpotLocation").value.trim();
+  if (!spotLocation) {
+    showToast(t("needSpotLocation"));
     return false;
   }
+
+  const obs = {
+    text,
+    spotLocation,
+    photos: stagedPhotos,
+    audioBlob: stagedAudioBlob || null,
+    ...editingAIFields,
+    ...(extraFields || {})
+  };
+
+  if (editingIndex !== null) {
+    activeReport.observations[editingIndex] = obs;
+  } else {
+    activeReport.observations.push(obs);
+  }
+
+  // Optimistic UI: reflect the save immediately and move on. The actual
+  // IndexedDB write happens in the background and retries on its own —
+  // the user is never blocked or shown a failure for this.
+  showToast(extraFields && extraFields.pendingAI ? t("offlineAnalyzeSaved") : t("observationSaved"));
+  await renderReportScreen();
+  showScreen("screen-report");
+
+  persistReportResilient(activeReport);
+  return true;
 }
 
 document.getElementById("saveObservationBtn").addEventListener("click", () => saveCurrentObservation());
@@ -1121,6 +1166,14 @@ document.getElementById("analyzeAIBtn").addEventListener("click", async () => {
     showToast(t("aiNeedInput"));
     return;
   }
+
+  // Offline: don't attempt the network call at all — save immediately
+  // with a pending flag so it can be analyzed later. AI never blocks saving.
+  if (!navigator.onLine) {
+    await saveCurrentObservation({ pendingAI: true });
+    return;
+  }
+
   const analyzingMsg = document.getElementById("aiAnalyzingMsg");
   const btn = document.getElementById("analyzeAIBtn");
   analyzingMsg.style.display = "block";
@@ -1155,9 +1208,7 @@ document.getElementById("analyzeAIBtn").addEventListener("click", async () => {
 function openAIReviewScreen(result) {
   document.getElementById("aiCategorySelect").value = result.category || "أخرى";
   document.getElementById("aiDescriptionInput").value = result.description || "";
-  document.getElementById("aiRiskSelect").value = result.riskLevel || "متوسطة";
   document.getElementById("aiActionInput").value = result.recommendedAction || "";
-  document.getElementById("aiPrioritySelect").value = result.priority || "عادية";
 
   const visualNote = document.getElementById("aiVisualNote");
   if (result.visualObservation) {
@@ -1186,11 +1237,61 @@ document.getElementById("aiApproveBtn").addEventListener("click", async () => {
   }
   const extraFields = {
     category: document.getElementById("aiCategorySelect").value,
-    riskLevel: document.getElementById("aiRiskSelect").value,
     recommendedAction: document.getElementById("aiActionInput").value.trim(),
-    priority: document.getElementById("aiPrioritySelect").value
+    pendingAI: false
   };
   await saveCurrentObservation(extraFields);
+});
+
+// ---------- Batch-analyze notes saved while offline ----------
+function updatePendingAIButton() {
+  const btn = document.getElementById("analyzePendingBtn");
+  const hasPending = activeReport.observations.some((o) => o.pendingAI);
+  btn.style.display = hasPending && navigator.onLine ? "block" : "none";
+}
+
+window.addEventListener("online", () => {
+  if (activeReport) updatePendingAIButton();
+});
+window.addEventListener("offline", () => {
+  if (activeReport) updatePendingAIButton();
+});
+
+document.getElementById("analyzePendingBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("analyzePendingBtn");
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+
+  const pendingObs = activeReport.observations.filter((o) => o.pendingAI);
+  let successCount = 0;
+
+  for (let i = 0; i < pendingObs.length; i++) {
+    const obs = pendingObs[i];
+    btn.textContent = t("analyzingPendingProgress")(i + 1, pendingObs.length);
+    try {
+      const imageBase64 = obs.photos && obs.photos.length ? await blobToBase64Raw(obsPhotos(obs)[0].blob) : null;
+      const resp = await fetch("/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: obs.text, imageBase64 })
+      });
+      if (resp.ok) {
+        const result = await resp.json();
+        obs.category = result.category;
+        obs.recommendedAction = result.recommendedAction;
+        obs.pendingAI = false;
+        successCount++;
+      }
+    } catch (err) {
+      console.error("Batch analyze failed for one observation, will retry later:", err);
+    }
+  }
+
+  await saveReport(activeReport);
+  btn.disabled = false;
+  btn.textContent = originalLabel;
+  showToast(t("analyzingPendingDone")(successCount, pendingObs.length));
+  await renderReportScreen();
 });
 
 // ---------- Preview ----------
@@ -1209,8 +1310,9 @@ function renderPreview() {
       : "";
     html += `
       <div class="preview-obs">
-        <h4>${currentLang === "ar" ? "الملاحظة رقم" : "Observation #"} ${i + 1}</h4>
+        <h4>${currentLang === "ar" ? "الملاحظة رقم" : "Observation #"} ${i + 1}${obs.category ? ` · ${escapeHtml(obs.category)}` : ""}</h4>
         ${thumbsHtml}
+        <p class="obs-spot">📍 ${escapeHtml(obs.spotLocation || "")}</p>
         <p>${escapeHtml(obs.text)}</p>
       </div>
     `;
@@ -1320,3 +1422,12 @@ document.getElementById("savePhotoSettingsBtn").addEventListener("click", async 
 
 // ---------- Init ----------
 applyLanguage("ar");
+
+// ---------- PWA: register service worker for offline support ----------
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((err) => {
+      console.warn("Service worker registration failed:", err);
+    });
+  });
+}

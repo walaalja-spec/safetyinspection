@@ -13,9 +13,18 @@ const MONTHLY_TEMPLATE_STORE = "monthly_templates";
 const MONTHLY_SCHOOLS_STORE = "monthly_schools";
 const MONTHLY_SUBMISSIONS_STORE = "monthly_submissions";
 
+// Single shared connection, opened once and reused — avoids the
+// overhead/edge-cases of re-opening a fresh IndexedDB connection on
+// every single read/write, which was the main suspect behind
+// intermittent save failures.
+let dbConnectionPromise = null;
+
 function openDB() {
-  return new Promise((resolve, reject) => {
+  if (dbConnectionPromise) return dbConnectionPromise;
+
+  dbConnectionPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -31,9 +40,49 @@ function openDB() {
         db.createObjectStore(MONTHLY_SUBMISSIONS_STORE, { keyPath: "id" });
       }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+
+    req.onblocked = () => {
+      // Another tab/old connection is holding the DB open during an
+      // upgrade. Don't hang forever — surface it so the retry logic
+      // in saveReportWithRetry can react instead of silently stalling.
+      console.warn("IndexedDB open blocked by another connection/tab.");
+    };
+
+    req.onsuccess = () => {
+      const db = req.result;
+      // If the connection drops unexpectedly (browser reclaiming
+      // resources, etc.), drop the cached promise so the next call
+      // opens a fresh connection instead of reusing a dead one.
+      db.onclose = () => { dbConnectionPromise = null; };
+      db.onversionchange = () => { db.close(); dbConnectionPromise = null; };
+      resolve(db);
+    };
+
+    req.onerror = () => {
+      dbConnectionPromise = null;
+      reject(req.error);
+    };
   });
+
+  return dbConnectionPromise;
+}
+
+// Retries a DB operation a few times with a short backoff — covers
+// transient failures (a brief lock, a just-dropped connection) instead
+// of failing the user's save on the first hiccup.
+async function withRetry(fn, retries = 3, delayMs = 250) {
+  let lastErr;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      console.warn(`DB operation failed (attempt ${attempt}/${retries}):`, err);
+      dbConnectionPromise = null; // force a fresh connection on retry
+      if (attempt < retries) await new Promise((r) => setTimeout(r, delayMs * attempt));
+    }
+  }
+  throw lastErr;
 }
 
 function generateId() {
@@ -63,12 +112,15 @@ async function getAllReports() {
 }
 
 async function saveReport(report) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).put(report);
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error);
+  return withRetry(async () => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).put(report);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
+    });
   });
 }
 

@@ -4,10 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>ملاحظاتي</title>
+<link rel="manifest" href="manifest.json?v=12">
+<meta name="theme-color" content="#1f5e3d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ملاحظاتي">
+<link rel="apple-touch-icon" href="icon.png?v=12">
+<link rel="icon" href="icon.png?v=12">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -117,6 +125,8 @@
 
       <p id="previousVisitNote" class="previous-visit-note" style="display:none;"></p>
 
+      <button id="analyzePendingBtn" class="btn btn-secondary btn-large" style="display:none;" data-i18n="btnAnalyzePending">🔄 تحليل كل الملاحظات المعلقة</button>
+
       <h3 class="section-heading" data-i18n="observationsHeading">الملاحظات</h3>
       <p id="noObservationsMsg" class="empty-msg" data-i18n="noObservations">لم تتم إضافة أي ملاحظات بعد.</p>
       <div id="observationsList"></div>
@@ -163,6 +173,9 @@
         <button type="button" id="transcribeBtn" class="btn btn-primary" data-i18n="btnTranscribe">تحويل إلى نص</button>
       </div>
 
+      <h3 class="section-heading" data-i18n="spotLocationHeading">موقع الملاحظة</h3>
+      <input type="text" id="observationSpotLocation" data-i18n-placeholder="spotLocationPlaceholder" placeholder="مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني">
+
       <h3 class="section-heading" data-i18n="textHeading">نص الملاحظة</h3>
       <textarea id="observationText" rows="5" data-i18n-placeholder="observationTextPlaceholder" placeholder="اكتب أو سجّل الملاحظة هنا"></textarea>
 
@@ -203,28 +216,8 @@
       </label>
 
       <label class="field">
-        <span data-i18n="aiRiskLabel">الخطورة المقترحة</span>
-        <select id="aiRiskSelect">
-          <option value="منخفضة">منخفضة</option>
-          <option value="متوسطة">متوسطة</option>
-          <option value="عالية">عالية</option>
-          <option value="حرجة">حرجة</option>
-        </select>
-      </label>
-
-      <label class="field">
         <span data-i18n="aiActionLabel">الإجراء المقترح</span>
         <textarea id="aiActionInput" rows="3"></textarea>
-      </label>
-
-      <label class="field">
-        <span data-i18n="aiPriorityLabel">الأولوية</span>
-        <select id="aiPrioritySelect">
-          <option value="عادية">عادية</option>
-          <option value="متوسطة">متوسطة</option>
-          <option value="عالية">عالية</option>
-          <option value="عاجلة">عاجلة</option>
-        </select>
       </label>
 
       <p id="aiVisualNote" class="ai-visual-note" style="display:none;"></p>

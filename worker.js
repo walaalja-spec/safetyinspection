@@ -19,20 +19,14 @@ const SYSTEM_PROMPT = `أنت مساعد يحلل ملاحظات تفتيش ال
 التصنيفات المتاحة (اختر الأنسب):
 كهرباء، حريق، مخارج طوارئ، سلامة المبنى، الأرضيات، الأبواب والنوافذ، النظافة، المواد الكيميائية، معدات السلامة، الإسعافات الأولية، التمديدات، المخاطر العامة، أخرى
 
-مستوى الخطورة (اختر واحد فقط): منخفضة، متوسطة، عالية، حرجة
-الأولوية (اختر واحدة فقط): عادية، متوسطة، عالية، عاجلة
-
 قواعد صارمة:
 1. لا تخترع تفاصيل غير مذكورة في النص أو غير ظاهرة بوضوح في الصورة.
 2. إذا وُجد تعارض بين كلام المستخدم والصورة، أو كانت الصورة لا تؤكد ما قاله المستخدم بوضوح، استخدم صياغة حذرة مثل "ذكر المستخدم ... بينما لا يمكن التحقق من ذلك بوضوح من الصورة" بدل الجزم.
-3. مستوى الخطورة والأولوية هما اقتراح أولي فقط، والمستخدم سيراجعهما ويستطيع تعديلهما.
-4. أعد الإجابة بصيغة JSON فقط، بدون أي نص إضافي قبله أو بعده، وبالضبط بهذا الشكل:
+3. أعد الإجابة بصيغة JSON فقط، بدون أي نص إضافي قبله أو بعده، وبالضبط بهذا الشكل:
 {
   "category": "",
   "description": "",
-  "riskLevel": "",
   "recommendedAction": "",
-  "priority": "",
   "visualObservation": "",
   "confidence": 0
 }
@@ -143,7 +137,7 @@ async function handleAnalyze(request, env) {
     return jsonResponse({ error: "invalid_json" }, 502);
   }
 
-  const requiredFields = ["category", "description", "riskLevel", "recommendedAction", "priority"];
+  const requiredFields = ["category", "description", "recommendedAction"];
   for (const field of requiredFields) {
     if (typeof parsed[field] !== "string" || !parsed[field]) {
       return jsonResponse({ error: "invalid_schema" }, 502);
@@ -153,9 +147,7 @@ async function handleAnalyze(request, env) {
   return jsonResponse({
     category: parsed.category,
     description: parsed.description,
-    riskLevel: parsed.riskLevel,
     recommendedAction: parsed.recommendedAction,
-    priority: parsed.priority,
     visualObservation: parsed.visualObservation || "",
     confidence: typeof parsed.confidence === "number" ? parsed.confidence : null
   });
