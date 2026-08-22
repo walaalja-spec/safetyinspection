@@ -62,7 +62,21 @@
         <div class="empty-state-title" data-i18n="noRecentVisits">لا توجد زيارات بعد</div>
       </div>
 
-      <h2 id="schoolsSectionHeading" class="section-heading" data-i18n="schoolsHeading">مدارسي</h2>
+      <button id="newReportBtn" class="btn btn-text" data-i18n="btnQuickReport">+ زيارة سريعة بدون مدرسة محددة</button>
+
+      <div class="action-row">
+        <button id="exportBackupBtn" class="btn btn-text" data-i18n="btnExportBackup">💾 نسخة احتياطية</button>
+        <button id="importBackupBtn" class="btn btn-text" data-i18n="btnImportBackup">📂 استيراد نسخة</button>
+      </div>
+      <input type="file" id="importBackupInput" accept="application/json" hidden>
+    </section>
+
+    <!-- SCREEN: Schools (search + full list) — opened from the home
+         page's "Schools" quick-access tile, the primary "new visit" CTA,
+         and the search tile, instead of showing the full list inline on
+         the crowded home dashboard. -->
+    <section id="screen-schools" class="screen">
+      <h2 data-i18n="schoolsHeading">مدارسي</h2>
 
       <div class="add-school-row">
         <input type="text" id="newSchoolNameInputHome" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة" autocomplete="off" enterkeyhint="done">
@@ -80,13 +94,7 @@
 
       <button id="viewUnlinkedBtn" class="btn btn-text" style="display:none;"></button>
 
-      <button id="newReportBtn" class="btn btn-text" data-i18n="btnQuickReport">+ زيارة سريعة بدون مدرسة محددة</button>
-
-      <div class="action-row">
-        <button id="exportBackupBtn" class="btn btn-text" data-i18n="btnExportBackup">💾 نسخة احتياطية</button>
-        <button id="importBackupBtn" class="btn btn-text" data-i18n="btnImportBackup">📂 استيراد نسخة</button>
-      </div>
-      <input type="file" id="importBackupInput" accept="application/json" hidden>
+      <button id="schoolsScreenBackBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
     </section>
 
     <!-- SCREEN: All Reports (flat list across every school) -->

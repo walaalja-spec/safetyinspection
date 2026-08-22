@@ -584,7 +584,8 @@ const screenBackButtonMap = {
   "screen-school-detail": "schoolDetailBackBtn",
   "screen-unlinked-visits": "unlinkedVisitsBackBtn",
   "screen-ai-review": "aiCancelBtn",
-  "screen-all-reports": "allReportsBackBtn"
+  "screen-all-reports": "allReportsBackBtn",
+  "screen-schools": "schoolsScreenBackBtn"
 };
 
 function showScreen(id) {
@@ -615,7 +616,6 @@ async function renderHome() {
   cachedAllReports = await getAllReports();
   renderDashboardStats();
   renderRecentVisits();
-  await renderSchoolsHomeList();
 }
 
 function resolveSchoolNameForReport(report) {
@@ -753,7 +753,8 @@ async function renderSchoolsHomeList() {
         if (confirm(t("monthlyDeleteSchoolConfirm"))) {
           await deleteMonthlySchool(btn.dataset.id);
           showToast(t("monthlySchoolDeleted"), "success");
-          renderHome();
+          await renderHome();
+          await renderSchoolsHomeList();
         }
       });
     });
@@ -826,18 +827,24 @@ document.getElementById("addSchoolBtnHome").addEventListener("click", async () =
   const newSchool = await addMonthlySchool(name);
   input.value = "";
   await renderHome();
+  await renderSchoolsHomeList();
 });
 
 document.getElementById("searchInput").addEventListener("input", renderSchoolsHomeList);
 
 // ---------- Dashboard quick actions ----------
-function scrollToSchoolsSection() {
-  document.getElementById("schoolsSectionHeading").scrollIntoView({ behavior: "smooth", block: "start" });
-  document.getElementById("searchInput").focus();
+// The full schools list no longer lives on the home dashboard (it was
+// crowding it) — it now lives in its own dedicated screen, opened from
+// the home page's "Schools" tile, the primary "new visit" CTA (visits
+// start by picking a school), and the search tile.
+async function openSchoolsScreen(focusSearch) {
+  showScreen("screen-schools");
+  await renderSchoolsHomeList();
+  if (focusSearch) document.getElementById("searchInput").focus();
 }
-document.getElementById("quickStartVisitBtn").addEventListener("click", scrollToSchoolsSection);
-document.getElementById("quickSchoolsBtn").addEventListener("click", scrollToSchoolsSection);
-document.getElementById("quickSearchBtn").addEventListener("click", scrollToSchoolsSection);
+document.getElementById("quickStartVisitBtn").addEventListener("click", () => openSchoolsScreen(false));
+document.getElementById("quickSchoolsBtn").addEventListener("click", () => openSchoolsScreen(false));
+document.getElementById("quickSearchBtn").addEventListener("click", () => openSchoolsScreen(true));
 
 document.getElementById("quickReportsBtn").addEventListener("click", () => {
   const listEl = document.getElementById("allReportsList");
@@ -1096,10 +1103,15 @@ document.getElementById("viewUnlinkedBtn").addEventListener("click", () => {
 
 document.getElementById("schoolDetailBackBtn").addEventListener("click", async () => {
   await renderHome();
-  showScreen("screen-home");
+  await openSchoolsScreen(false);
 });
 
 document.getElementById("unlinkedVisitsBackBtn").addEventListener("click", async () => {
+  await renderHome();
+  await openSchoolsScreen(false);
+});
+
+document.getElementById("schoolsScreenBackBtn").addEventListener("click", async () => {
   await renderHome();
   showScreen("screen-home");
 });

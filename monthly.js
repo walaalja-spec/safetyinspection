@@ -121,6 +121,10 @@ function renderSlotsEditor() {
       row.remove();
     });
     row.dataset.slotId = slot.id;
+    // Preserved (not shown/editable here) so renaming a slot's display
+    // label doesn't break which PowerPoint frame its photos map to —
+    // see pptx.js's groupFilledSlotsByLabel().
+    if (slot.category) row.dataset.category = slot.category;
     el.appendChild(row);
   });
 }
@@ -144,7 +148,10 @@ document.getElementById("saveSlotsBtn").addEventListener("click", async () => {
   const newSlots = [];
   rows.forEach((row) => {
     const label = row.querySelector("input").value.trim();
-    if (label) newSlots.push({ id: row.dataset.slotId, label });
+    if (!label) return;
+    const slot = { id: row.dataset.slotId, label };
+    if (row.dataset.category) slot.category = row.dataset.category;
+    newSlots.push(slot);
   });
   await saveMonthlySlots(newSlots);
   monthlySlots = newSlots;
