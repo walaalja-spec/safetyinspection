@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>WJ Safety</title>
 <link rel="manifest" href="manifest.json?v=20">
-<meta name="theme-color" content="#1f5e3d">
+<meta name="theme-color" content="#124a30">
 <meta name="color-scheme" content="light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,7 +15,7 @@
 <link rel="icon" href="icon.png?v=20">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
@@ -39,10 +39,10 @@
       </div>
 
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value" id="statSchools">0</div><div class="stat-label" data-i18n="statSchoolsLabel">مدارس</div></div>
-        <div class="stat-card"><div class="stat-value" id="statVisits">0</div><div class="stat-label" data-i18n="statVisitsLabel">زيارات</div></div>
-        <div class="stat-card"><div class="stat-value" id="statObservations">0</div><div class="stat-label" data-i18n="statObsLabel">ملاحظات</div></div>
-        <div class="stat-card"><div class="stat-value" id="statThisMonth">0</div><div class="stat-label" data-i18n="statMonthLabel">هذا الشهر</div></div>
+        <div class="stat-card stat-card-a"><span class="stat-icon">🏫</span><div class="stat-value" id="statSchools">0</div><div class="stat-label" data-i18n="statSchoolsLabel">مدارس</div></div>
+        <div class="stat-card stat-card-b"><span class="stat-icon">🧭</span><div class="stat-value" id="statVisits">0</div><div class="stat-label" data-i18n="statVisitsLabel">زيارات</div></div>
+        <div class="stat-card stat-card-c"><span class="stat-icon">📝</span><div class="stat-value" id="statObservations">0</div><div class="stat-label" data-i18n="statObsLabel">ملاحظات</div></div>
+        <div class="stat-card stat-card-d"><span class="stat-icon">📅</span><div class="stat-value" id="statThisMonth">0</div><div class="stat-label" data-i18n="statMonthLabel">هذا الشهر</div></div>
       </div>
 
       <button id="quickStartVisitBtn" class="btn btn-primary btn-large btn-cta" data-i18n="btnQuickStartVisit2">＋ زيارة جديدة</button>
@@ -472,6 +472,7 @@
   <!-- Photo action modal -->
   <div id="photoActionModal" class="modal-overlay">
     <div class="modal-sheet">
+      <div class="modal-grabber" aria-hidden="true"></div>
       <img id="photoActionPreview" class="photo-action-preview" alt="">
       <div class="action-row">
         <button type="button" id="viewOriginalBtn" class="btn btn-secondary" data-i18n="btnViewOriginal">الصورة الأصلية</button>

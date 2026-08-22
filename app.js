@@ -16,6 +16,35 @@ const OBSERVATION_CATEGORIES = [
   "معدات السلامة", "الإسعافات الأولية", "التمديدات", "المخاطر العامة", "أخرى"
 ];
 
+// Maps each observation category to an accent color used throughout the
+// UI (observation card rail + badge) so the category taxonomy doubles as
+// a visual wayfinding system — purely presentational, never read by any
+// storage/export/AI code path.
+const CATEGORY_COLORS = {
+  "كهرباء": "#c9860f",
+  "كهرباء وإنارة": "#c9860f",
+  "سباكة": "#2f74b5",
+  "دورات مياه": "#0c8a7e",
+  "تكييف وتبريد": "#2f8fc7",
+  "حريق": "#c23b30",
+  "السلامة": "#14603f",
+  "مخارج طوارئ": "#d1651c",
+  "سلامة المبنى": "#5b6b73",
+  "الأرضيات": "#97633c",
+  "الأبواب والنوافذ": "#5c5fc4",
+  "أسقف وجدران": "#55707e",
+  "النظافة": "#3f9e63",
+  "المواد الكيميائية": "#8a4bb0",
+  "معدات السلامة": "#14603f",
+  "الإسعافات الأولية": "#cf4570",
+  "التمديدات": "#c9860f",
+  "المخاطر العامة": "#9c2b2b",
+  "أخرى": "#6b736c"
+};
+function categoryColor(cat) {
+  return CATEGORY_COLORS[cat] || "#6b736c";
+}
+
 function populateCategorySelects() {
   const aiSelect = document.getElementById("aiCategorySelect");
   const aiPrev = aiSelect.value;
@@ -1167,6 +1196,7 @@ async function renderReportScreen() {
     activeReport.observations.forEach((obs, i) => {
       const card = document.createElement("div");
       card.className = "obs-card";
+      if (obs.category) card.style.setProperty("--cat", categoryColor(obs.category));
       const photos = obsPhotos(obs);
       const thumbsHtml = photos.length
         ? `<div class="obs-thumb-grid">${photos.map(p => `<img src="${URL.createObjectURL(p.blob)}" class="obs-thumb" alt="">`).join("")}</div>`
