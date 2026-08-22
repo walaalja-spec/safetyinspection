@@ -78,7 +78,7 @@ async function renderMonthlySchoolsList() {
       if (confirm(t("monthlyDeleteSchoolConfirm"))) {
         await deleteMonthlySchool(btn.dataset.id);
         monthlySchools = await getAllMonthlySchools();
-        showToast(t("monthlySchoolDeleted"));
+        showToast(t("monthlySchoolDeleted"), "success");
         renderMonthlySchoolsList();
       }
     });
@@ -89,7 +89,7 @@ document.getElementById("addSchoolBtn").addEventListener("click", async () => {
   const input = document.getElementById("newSchoolNameInput");
   const name = input.value.trim();
   if (!name) {
-    showToast(t("needSchoolName"));
+    showToast(t("needSchoolName"), "warning");
     return;
   }
   await addMonthlySchool(name);
@@ -121,6 +121,10 @@ function renderSlotsEditor() {
       row.remove();
     });
     row.dataset.slotId = slot.id;
+    // Preserved (not shown/editable here) so renaming a slot's display
+    // label doesn't break which PowerPoint frame its photos map to —
+    // see pptx.js's groupFilledSlotsByLabel().
+    if (slot.category) row.dataset.category = slot.category;
     el.appendChild(row);
   });
 }
@@ -144,11 +148,14 @@ document.getElementById("saveSlotsBtn").addEventListener("click", async () => {
   const newSlots = [];
   rows.forEach((row) => {
     const label = row.querySelector("input").value.trim();
-    if (label) newSlots.push({ id: row.dataset.slotId, label });
+    if (!label) return;
+    const slot = { id: row.dataset.slotId, label };
+    if (row.dataset.category) slot.category = row.dataset.category;
+    newSlots.push(slot);
   });
   await saveMonthlySlots(newSlots);
   monthlySlots = newSlots;
-  showToast(t("monthlySlotsSaved"));
+  showToast(t("monthlySlotsSaved"), "success");
   await renderMonthlySchoolsList();
   showScreen("screen-monthly-home");
 });
@@ -256,7 +263,7 @@ async function renderMonthlySlotsGrid() {
     btn.addEventListener("click", async () => {
       delete activeSubmission.photos[btn.dataset.slot];
       await saveMonthlySubmission(activeSubmission);
-      showToast(t("monthlyPhotoDeleted"));
+      showToast(t("monthlyPhotoDeleted"), "success");
       await renderMonthlySlotsGrid();
     });
   });
@@ -283,11 +290,11 @@ async function handleMonthlyPhotoInput(e) {
     const blob = await compressImage(file, 2200, 0.92);
     activeSubmission.photos[captureSlotId] = { blob, takenAt: Date.now() };
     await saveMonthlySubmission(activeSubmission);
-    showToast(t("monthlyPhotoSaved"));
+    showToast(t("monthlyPhotoSaved"), "success");
     await renderMonthlySlotsGrid();
   } catch (err) {
     console.error(err);
-    showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.");
+    showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.", "error");
   }
   captureSlotId = null;
 }
@@ -337,10 +344,10 @@ document.getElementById("generatePptxBtn").addEventListener("click", async () =>
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast(t("pptxGenerated"));
+    showToast(t("pptxGenerated"), "success");
   } catch (err) {
     console.error("PPTX generation failed:", err);
-    showToast(t("pptxGenerateFailed"));
+    showToast(t("pptxGenerateFailed"), "error");
   } finally {
     btn.disabled = false;
     msg.style.display = "none";
@@ -394,7 +401,7 @@ let multiSelectedSchools = [];
 document.getElementById("multiSchoolNextBtn").addEventListener("click", async () => {
   const checkedIds = Array.from(document.querySelectorAll(".msc-checkbox:checked")).map((cb) => cb.dataset.id);
   if (checkedIds.length === 0) {
-    showToast(t("multiNeedSelection"));
+    showToast(t("multiNeedSelection"), "warning");
     return;
   }
   // Order follows the current app/list order (monthlySchools), not
@@ -448,10 +455,10 @@ document.getElementById("generateMultiPptxBtn").addEventListener("click", async 
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast(t("pptxGenerated"));
+    showToast(t("pptxGenerated"), "success");
   } catch (err) {
     console.error("Multi-school PPTX generation failed:", err);
-    showToast(t("pptxGenerateFailed"));
+    showToast(t("pptxGenerateFailed"), "error");
   } finally {
     btn.disabled = false;
     msg.style.display = "none";

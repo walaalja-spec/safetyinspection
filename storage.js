@@ -416,25 +416,48 @@ async function storeDelete(storeName, id) {
 // ---------------------------------------------------------------------
 
 // Matches the real PowerPoint template's 15 photo placeholders exactly
-// (see pptx.js's PPTX_IMAGE_MAP) — duplicate labels are intentional,
-// since the template has multiple frames for some categories (e.g. two
+// (see pptx.js's PPTX_IMAGE_MAP) — duplicate categories are intentional,
+// since the template has multiple frames for some of them (e.g. two
 // "صورة الموقع العام" photos, four "الأمن والسلامة" photos).
+//
+// "لافتة المبنى" (building sign) is listed first so it's also the first
+// photo the checklist/photo grid asks for.
+//
+// Each entry's `category` is the STABLE key pptx.js matches against to
+// pick which documented photo goes in which template frame — separate
+// from `label`, which is only the display text and is free for the user
+// to rename via "إدارة قائمة الصور المطلوبة" without breaking that match
+// (see getMonthlySlots()'s back-compat fallback below, and pptx.js's
+// groupFilledSlotsByLabel()).
 const DEFAULT_MONTHLY_SLOTS = [
-  "صورة الموقع العام", "صورة الموقع العام",
-  "صورة المدرسة / المبنى", "صورة المدرسة / المبنى",
-  "السطح",
-  "صور الممرات",
-  "صور الحمام / المطبخ",
-  "صور للفصول / المكاتب", "صور للفصول / المكاتب", "صور للفصول / المكاتب",
-  "الأمن والسلامة", "الأمن والسلامة", "الأمن والسلامة", "الأمن والسلامة",
-  "لافتة المبنى"
+  { category: "لافتة المبنى", label: "لافتة المبنى" },
+  { category: "صورة الموقع العام", label: "صورة الموقع العام" },
+  { category: "صورة الموقع العام", label: "صورة الموقع العام" },
+  { category: "صورة المدرسة / المبنى", label: "صورة المدرسة / المبنى" },
+  { category: "صورة المدرسة / المبنى", label: "صورة المدرسة / المبنى" },
+  { category: "السطح", label: "السطح" },
+  { category: "صور الممرات", label: "صور الممرات" },
+  { category: "صور الحمام / المطبخ", label: "صور الحمام / المطبخ" },
+  { category: "صور للفصول / المكاتب", label: "صور للفصول / المكاتب" },
+  { category: "صور للفصول / المكاتب", label: "صور للفصول / المكاتب" },
+  { category: "صور للفصول / المكاتب", label: "صور للفصول / المكاتب" },
+  { category: "الأمن والسلامة", label: "الأمن والسلامة" },
+  { category: "الأمن والسلامة", label: "الأمن والسلامة" },
+  { category: "الأمن والسلامة", label: "الأمن والسلامة" },
+  { category: "الأمن والسلامة", label: "الأمن والسلامة" }
 ];
 
 // Returns the shared checklist of required photo types (same for every school).
 async function getMonthlySlots() {
   const record = await storeGet(MONTHLY_TEMPLATE_STORE, "template");
-  if (record && record.slots && record.slots.length) return record.slots;
-  return DEFAULT_MONTHLY_SLOTS.map((label, i) => ({ id: "slot_" + i, label }));
+  if (record && record.slots && record.slots.length) {
+    // Back-compat: a template saved before `category` existed (or a slot
+    // added/edited without one) falls back to its own label — exactly
+    // today's matching behavior, unchanged for anyone who hasn't renamed
+    // that slot since.
+    return record.slots.map((s) => (s.category ? s : { ...s, category: s.label }));
+  }
+  return DEFAULT_MONTHLY_SLOTS.map((def, i) => ({ id: "slot_" + i, label: def.label, category: def.category }));
 }
 
 async function saveMonthlySlots(slots) {

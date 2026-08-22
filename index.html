@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>WJ Safety</title>
 <link rel="manifest" href="manifest.json?v=20">
-<meta name="theme-color" content="#1f5e3d">
+<meta name="theme-color" content="#124a30">
+<meta name="color-scheme" content="light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,7 +15,7 @@
 <link rel="icon" href="icon.png?v=20">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
@@ -38,10 +39,10 @@
       </div>
 
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value" id="statSchools">0</div><div class="stat-label" data-i18n="statSchoolsLabel">مدارس</div></div>
-        <div class="stat-card"><div class="stat-value" id="statVisits">0</div><div class="stat-label" data-i18n="statVisitsLabel">زيارات</div></div>
-        <div class="stat-card"><div class="stat-value" id="statObservations">0</div><div class="stat-label" data-i18n="statObsLabel">ملاحظات</div></div>
-        <div class="stat-card"><div class="stat-value" id="statThisMonth">0</div><div class="stat-label" data-i18n="statMonthLabel">هذا الشهر</div></div>
+        <div class="stat-card stat-card-a"><span class="stat-icon">🏫</span><div class="stat-value" id="statSchools">0</div><div class="stat-label" data-i18n="statSchoolsLabel">مدارس</div></div>
+        <div class="stat-card stat-card-b"><span class="stat-icon">🧭</span><div class="stat-value" id="statVisits">0</div><div class="stat-label" data-i18n="statVisitsLabel">زيارات</div></div>
+        <div class="stat-card stat-card-c"><span class="stat-icon">📝</span><div class="stat-value" id="statObservations">0</div><div class="stat-label" data-i18n="statObsLabel">ملاحظات</div></div>
+        <div class="stat-card stat-card-d"><span class="stat-icon">📅</span><div class="stat-value" id="statThisMonth">0</div><div class="stat-label" data-i18n="statMonthLabel">هذا الشهر</div></div>
       </div>
 
       <button id="quickStartVisitBtn" class="btn btn-primary btn-large btn-cta" data-i18n="btnQuickStartVisit2">＋ زيارة جديدة</button>
@@ -61,14 +62,28 @@
         <div class="empty-state-title" data-i18n="noRecentVisits">لا توجد زيارات بعد</div>
       </div>
 
-      <h2 id="schoolsSectionHeading" class="section-heading" data-i18n="schoolsHeading">مدارسي</h2>
+      <button id="newReportBtn" class="btn btn-text" data-i18n="btnQuickReport">+ زيارة سريعة بدون مدرسة محددة</button>
+
+      <div class="action-row">
+        <button id="exportBackupBtn" class="btn btn-text" data-i18n="btnExportBackup">💾 نسخة احتياطية</button>
+        <button id="importBackupBtn" class="btn btn-text" data-i18n="btnImportBackup">📂 استيراد نسخة</button>
+      </div>
+      <input type="file" id="importBackupInput" accept="application/json" hidden>
+    </section>
+
+    <!-- SCREEN: Schools (search + full list) — opened from the home
+         page's "Schools" quick-access tile, the primary "new visit" CTA,
+         and the search tile, instead of showing the full list inline on
+         the crowded home dashboard. -->
+    <section id="screen-schools" class="screen">
+      <h2 data-i18n="schoolsHeading">مدارسي</h2>
 
       <div class="add-school-row">
-        <input type="text" id="newSchoolNameInputHome" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة">
+        <input type="text" id="newSchoolNameInputHome" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة" autocomplete="off" enterkeyhint="done">
         <button type="button" id="addSchoolBtnHome" class="btn btn-primary">+</button>
       </div>
 
-      <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="searchSchoolPlaceholder" placeholder="بحث بالمدرسة">
+      <input type="search" id="searchInput" class="search-input" data-i18n-placeholder="searchSchoolPlaceholder" placeholder="بحث بالمدرسة" autocomplete="off" enterkeyhint="search">
 
       <div id="schoolsHomeList"></div>
       <div id="noSchoolsMsg" class="empty-state" style="display:none;">
@@ -79,13 +94,7 @@
 
       <button id="viewUnlinkedBtn" class="btn btn-text" style="display:none;"></button>
 
-      <button id="newReportBtn" class="btn btn-text" data-i18n="btnQuickReport">+ زيارة سريعة بدون مدرسة محددة</button>
-
-      <div class="action-row">
-        <button id="exportBackupBtn" class="btn btn-text" data-i18n="btnExportBackup">💾 نسخة احتياطية</button>
-        <button id="importBackupBtn" class="btn btn-text" data-i18n="btnImportBackup">📂 استيراد نسخة</button>
-      </div>
-      <input type="file" id="importBackupInput" accept="application/json" hidden>
+      <button id="schoolsScreenBackBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
     </section>
 
     <!-- SCREEN: All Reports (flat list across every school) -->
@@ -164,7 +173,7 @@
     <section id="screen-scene-template" class="screen">
       <h2 data-i18n="manageScenesHeading">إدارة قائمة المشاهد</h2>
       <div class="add-school-row">
-        <input type="text" id="newSceneNameInput" data-i18n-placeholder="newScenePlaceholder" placeholder="اسم مشهد جديد">
+        <input type="text" id="newSceneNameInput" data-i18n-placeholder="newScenePlaceholder" placeholder="اسم مشهد جديد" autocomplete="off" enterkeyhint="done">
         <button type="button" id="addSceneBtn" class="btn btn-primary">+</button>
       </div>
       <div id="sceneTemplateList"></div>
@@ -291,7 +300,7 @@
         <select id="observationCategorySelect"></select>
 
         <h3 class="section-heading" data-i18n="spotLocationHeading">موقع الملاحظة</h3>
-        <input type="text" id="observationSpotLocation" data-i18n-placeholder="spotLocationPlaceholder" placeholder="مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني">
+        <input type="text" id="observationSpotLocation" data-i18n-placeholder="spotLocationPlaceholder" placeholder="مثال: فصل 3ب - بجانب السبورة، أو غرفة المعلمات - الدور الثاني" autocomplete="off" enterkeyhint="done">
       </div>
 
       <button type="button" id="saveObservationBtn" class="btn btn-primary btn-large btn-cta" data-i18n="btnSaveObservation">حفظ الملاحظة</button>
@@ -372,7 +381,7 @@
       </label>
 
       <div class="add-school-row">
-        <input type="text" id="newSchoolNameInput" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة">
+        <input type="text" id="newSchoolNameInput" data-i18n-placeholder="monthlySchoolPlaceholder" placeholder="اسم مدرسة جديدة" autocomplete="off" enterkeyhint="done">
         <button type="button" id="addSchoolBtn" class="btn btn-primary">+</button>
       </div>
 
@@ -471,6 +480,7 @@
   <!-- Photo action modal -->
   <div id="photoActionModal" class="modal-overlay">
     <div class="modal-sheet">
+      <div class="modal-grabber" aria-hidden="true"></div>
       <img id="photoActionPreview" class="photo-action-preview" alt="">
       <div class="action-row">
         <button type="button" id="viewOriginalBtn" class="btn btn-secondary" data-i18n="btnViewOriginal">الصورة الأصلية</button>

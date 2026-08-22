@@ -22,9 +22,18 @@
 
 const PPTX_TEMPLATE_PATH = "/monthly-template.pptx";
 
-// { category label -> [ { media: "imageN.jpeg", ratio: width/height } ] }
-// in the exact order slots of that label should be assigned.
+// { category -> [ { media: "imageN.jpeg", ratio: width/height } ] } in the
+// exact order slots of that category should be assigned. Keyed by the
+// slot's stable `category` (see storage.js's DEFAULT_MONTHLY_SLOTS and
+// getMonthlySlots()) — NOT by the user-editable display label, so
+// renaming a slot's label in "إدارة قائمة الصور المطلوبة" never breaks
+// which documented photo lands in which template frame.
+//
+// "لافتة المبنى" first, matching the checklist order.
 const PPTX_IMAGE_MAP = {
+  "لافتة المبنى": [
+    { media: "image5.jpeg", ratio: 4752000 / 4278591 }
+  ],
   "صورة الموقع العام": [
     { media: "image11.jpeg", ratio: 1650545 / 1183603 },
     { media: "image17.jpeg", ratio: 1742922 / 1241288 }
@@ -52,9 +61,6 @@ const PPTX_IMAGE_MAP = {
     { media: "image7.jpeg", ratio: 1657114 / 1214850 },
     { media: "image6.jpeg", ratio: 1657114 / 1227993 },
     { media: "image1.jpeg", ratio: 1648105 / 1227993 }
-  ],
-  "لافتة المبنى": [
-    { media: "image5.jpeg", ratio: 4752000 / 4278591 }
   ]
 };
 
@@ -165,15 +171,19 @@ function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000) {
   });
 }
 
-// Builds { label -> [{slotId, entry}] } from the current slots list and
-// submission, preserving slot order, only for slots that actually have
-// a saved photo.
+// Builds { category -> [{slotId, entry}] } from the current slots list
+// and submission, preserving slot order, only for slots that actually
+// have a saved photo. Grouped by the slot's stable `category` (falling
+// back to its label only if `category` is somehow missing) so a slot
+// that's been renamed for display still resolves to the right template
+// frame — see PPTX_IMAGE_MAP's comment for why this matters.
 function groupFilledSlotsByLabel(slots, submission) {
   const byLabel = {};
   slots.forEach((slot) => {
     const entry = submission.photos && submission.photos[slot.id];
     if (!entry) return;
-    (byLabel[slot.label] = byLabel[slot.label] || []).push({ slotId: slot.id, entry });
+    const key = slot.category || slot.label;
+    (byLabel[key] = byLabel[key] || []).push({ slotId: slot.id, entry });
   });
   return byLabel;
 }

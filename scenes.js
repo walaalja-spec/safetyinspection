@@ -108,7 +108,7 @@ async function setSceneStatus(sceneId, status) {
     await renderSceneTrackingScreen(); // instant refresh, no page reload
   } catch (err) {
     console.error("Failed to save scene status:", err);
-    showToast(t("sceneSaveFailed"));
+    showToast(t("sceneSaveFailed"), "error");
   } finally {
     sceneStatusSaveInFlight.delete(sceneId);
   }
@@ -189,7 +189,7 @@ async function renderSceneTemplateList() {
       if (confirm(t("confirmDeleteScene"))) {
         sceneList = sceneList.filter((s) => s.id !== btn.dataset.id);
         await saveSceneTemplate(sceneList);
-        showToast(t("sceneDeleted"));
+        showToast(t("sceneDeleted"), "success");
         await renderSceneTemplateList();
       }
     });
@@ -200,13 +200,13 @@ document.getElementById("addSceneBtn").addEventListener("click", async () => {
   const input = document.getElementById("newSceneNameInput");
   const label = input.value.trim();
   if (!label) {
-    showToast(t("needSceneName"));
+    showToast(t("needSceneName"), "warning");
     return;
   }
   sceneList.push({ id: generateId(), label });
   await saveSceneTemplate(sceneList);
   input.value = "";
-  showToast(t("sceneAdded"));
+  showToast(t("sceneAdded"), "success");
   await renderSceneTemplateList();
 });
 

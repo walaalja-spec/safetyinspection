@@ -16,6 +16,35 @@ const OBSERVATION_CATEGORIES = [
   "معدات السلامة", "الإسعافات الأولية", "التمديدات", "المخاطر العامة", "أخرى"
 ];
 
+// Maps each observation category to an accent color used throughout the
+// UI (observation card rail + badge) so the category taxonomy doubles as
+// a visual wayfinding system — purely presentational, never read by any
+// storage/export/AI code path.
+const CATEGORY_COLORS = {
+  "كهرباء": "#c9860f",
+  "كهرباء وإنارة": "#c9860f",
+  "سباكة": "#2f74b5",
+  "دورات مياه": "#0c8a7e",
+  "تكييف وتبريد": "#2f8fc7",
+  "حريق": "#c23b30",
+  "السلامة": "#14603f",
+  "مخارج طوارئ": "#d1651c",
+  "سلامة المبنى": "#5b6b73",
+  "الأرضيات": "#97633c",
+  "الأبواب والنوافذ": "#5c5fc4",
+  "أسقف وجدران": "#55707e",
+  "النظافة": "#3f9e63",
+  "المواد الكيميائية": "#8a4bb0",
+  "معدات السلامة": "#14603f",
+  "الإسعافات الأولية": "#cf4570",
+  "التمديدات": "#c9860f",
+  "المخاطر العامة": "#9c2b2b",
+  "أخرى": "#6b736c"
+};
+function categoryColor(cat) {
+  return CATEGORY_COLORS[cat] || "#6b736c";
+}
+
 function populateCategorySelects() {
   const aiSelect = document.getElementById("aiCategorySelect");
   const aiPrev = aiSelect.value;
@@ -518,10 +547,10 @@ document.getElementById("langToggle").addEventListener("click", () => {
 
 // ---------- Toast ----------
 let toastTimer = null;
-function showToast(message) {
+function showToast(message, type = "") {
   const el = document.getElementById("toast");
   el.textContent = message;
-  el.classList.add("show");
+  el.className = "toast show" + (type ? ` toast-${type}` : "");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
 }
@@ -555,7 +584,8 @@ const screenBackButtonMap = {
   "screen-school-detail": "schoolDetailBackBtn",
   "screen-unlinked-visits": "unlinkedVisitsBackBtn",
   "screen-ai-review": "aiCancelBtn",
-  "screen-all-reports": "allReportsBackBtn"
+  "screen-all-reports": "allReportsBackBtn",
+  "screen-schools": "schoolsScreenBackBtn"
 };
 
 function showScreen(id) {
@@ -586,7 +616,6 @@ async function renderHome() {
   cachedAllReports = await getAllReports();
   renderDashboardStats();
   renderRecentVisits();
-  await renderSchoolsHomeList();
 }
 
 function resolveSchoolNameForReport(report) {
@@ -723,8 +752,9 @@ async function renderSchoolsHomeList() {
       btn.addEventListener("click", async () => {
         if (confirm(t("monthlyDeleteSchoolConfirm"))) {
           await deleteMonthlySchool(btn.dataset.id);
-          showToast(t("monthlySchoolDeleted"));
-          renderHome();
+          showToast(t("monthlySchoolDeleted"), "success");
+          await renderHome();
+          await renderSchoolsHomeList();
         }
       });
     });
@@ -791,24 +821,30 @@ document.getElementById("addSchoolBtnHome").addEventListener("click", async () =
   const input = document.getElementById("newSchoolNameInputHome");
   const name = input.value.trim();
   if (!name) {
-    showToast(t("needSchoolName"));
+    showToast(t("needSchoolName"), "warning");
     return;
   }
   const newSchool = await addMonthlySchool(name);
   input.value = "";
   await renderHome();
+  await renderSchoolsHomeList();
 });
 
 document.getElementById("searchInput").addEventListener("input", renderSchoolsHomeList);
 
 // ---------- Dashboard quick actions ----------
-function scrollToSchoolsSection() {
-  document.getElementById("schoolsSectionHeading").scrollIntoView({ behavior: "smooth", block: "start" });
-  document.getElementById("searchInput").focus();
+// The full schools list no longer lives on the home dashboard (it was
+// crowding it) — it now lives in its own dedicated screen, opened from
+// the home page's "Schools" tile, the primary "new visit" CTA (visits
+// start by picking a school), and the search tile.
+async function openSchoolsScreen(focusSearch) {
+  showScreen("screen-schools");
+  await renderSchoolsHomeList();
+  if (focusSearch) document.getElementById("searchInput").focus();
 }
-document.getElementById("quickStartVisitBtn").addEventListener("click", scrollToSchoolsSection);
-document.getElementById("quickSchoolsBtn").addEventListener("click", scrollToSchoolsSection);
-document.getElementById("quickSearchBtn").addEventListener("click", scrollToSchoolsSection);
+document.getElementById("quickStartVisitBtn").addEventListener("click", () => openSchoolsScreen(false));
+document.getElementById("quickSchoolsBtn").addEventListener("click", () => openSchoolsScreen(false));
+document.getElementById("quickSearchBtn").addEventListener("click", () => openSchoolsScreen(true));
 
 document.getElementById("quickReportsBtn").addEventListener("click", () => {
   const listEl = document.getElementById("allReportsList");
@@ -909,7 +945,7 @@ async function openSchoolDetail(schoolId) {
       btn.addEventListener("click", async () => {
         if (confirm(t("confirmDeleteReport"))) {
           await deleteReportById(btn.dataset.id);
-          showToast(t("reportDeleted"));
+          showToast(t("reportDeleted"), "success");
           openSchoolDetail(schoolId);
         }
       });
@@ -979,7 +1015,7 @@ async function reuseObservationForSchool(obsData) {
   document.getElementById("observationSpotLocation").value = obsData.spotLocation || "";
   document.getElementById("observationCategorySelect").value = obsData.category || "";
   editingAIFields = obsData.recommendedAction ? { recommendedAction: obsData.recommendedAction } : {};
-  showToast(t("noteReused"));
+  showToast(t("noteReused"), "success");
 }
 
 let activeSchoolForVisits = null;
@@ -1055,7 +1091,7 @@ document.getElementById("viewUnlinkedBtn").addEventListener("click", () => {
     btn.addEventListener("click", async () => {
       if (confirm(t("confirmDeleteReport"))) {
         await deleteReportById(btn.dataset.id);
-        showToast(t("reportDeleted"));
+        showToast(t("reportDeleted"), "success");
         await renderHome();
         document.getElementById("viewUnlinkedBtn").click();
       }
@@ -1067,10 +1103,15 @@ document.getElementById("viewUnlinkedBtn").addEventListener("click", () => {
 
 document.getElementById("schoolDetailBackBtn").addEventListener("click", async () => {
   await renderHome();
-  showScreen("screen-home");
+  await openSchoolsScreen(false);
 });
 
 document.getElementById("unlinkedVisitsBackBtn").addEventListener("click", async () => {
+  await renderHome();
+  await openSchoolsScreen(false);
+});
+
+document.getElementById("schoolsScreenBackBtn").addEventListener("click", async () => {
   await renderHome();
   showScreen("screen-home");
 });
@@ -1086,10 +1127,10 @@ document.getElementById("exportBackupBtn").addEventListener("click", async () =>
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast(t("backupExported"));
+    showToast(t("backupExported"), "success");
   } catch (err) {
     console.error(err);
-    showToast(t("backupFailed"));
+    showToast(t("backupFailed"), "error");
   }
 });
 
@@ -1103,11 +1144,11 @@ document.getElementById("importBackupInput").addEventListener("change", async (e
   if (!file) return;
   try {
     const summary = await importBackupFile(file);
-    showToast(t("backupImported")(summary));
+    showToast(t("backupImported")(summary), "success");
     renderHome();
   } catch (err) {
     console.error(err);
-    showToast(t("backupImportFailed"));
+    showToast(t("backupImportFailed"), "error");
   }
 });
 
@@ -1167,6 +1208,7 @@ async function renderReportScreen() {
     activeReport.observations.forEach((obs, i) => {
       const card = document.createElement("div");
       card.className = "obs-card";
+      if (obs.category) card.style.setProperty("--cat", categoryColor(obs.category));
       const photos = obsPhotos(obs);
       const thumbsHtml = photos.length
         ? `<div class="obs-thumb-grid">${photos.map(p => `<img src="${URL.createObjectURL(p.blob)}" class="obs-thumb" alt="">`).join("")}</div>`
@@ -1205,7 +1247,7 @@ async function renderReportScreen() {
         if (confirm(t("confirmDeleteObservation"))) {
           activeReport.observations.splice(parseInt(btn.dataset.i, 10), 1);
           await saveReport(activeReport);
-          showToast(t("observationDeleted"));
+          showToast(t("observationDeleted"), "success");
           await renderReportScreen();
         }
       });
@@ -1271,7 +1313,7 @@ document.getElementById("editReportForm").addEventListener("submit", async (e) =
   activeReport.location = document.getElementById("editReportLocation").value.trim();
   activeReport.date = document.getElementById("editReportDate").value;
   await saveReport(activeReport);
-  showToast(t("reportUpdated"));
+  showToast(t("reportUpdated"), "success");
   await renderReportScreen();
   showScreen("screen-report");
 });
@@ -1382,7 +1424,7 @@ async function handlePhotoInput(e) {
     renderPhotosGrid();
   } catch (err) {
     console.error(err);
-    showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.");
+    showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.", "error");
   }
   e.target.value = "";
 }
@@ -1475,7 +1517,7 @@ function formatTimer(sec) {
 document.getElementById("recordBtn").addEventListener("click", async () => {
   if (!isRecording) {
     if (!window.isSecureContext) {
-      showToast(t("micNeedsHttps"));
+      showToast(t("micNeedsHttps"), "warning");
       return;
     }
     try {
@@ -1488,7 +1530,7 @@ document.getElementById("recordBtn").addEventListener("click", async () => {
       document.getElementById("audioPlaybackBox").style.display = "none";
     } catch (err) {
       console.error(err);
-      showToast(t("micDenied"));
+      showToast(t("micDenied"), "warning");
     }
   } else {
     const { blob, transcript } = await recorder.stop();
@@ -1505,7 +1547,7 @@ document.getElementById("recordBtn").addEventListener("click", async () => {
       if (transcript && !textarea.value.trim()) {
         textarea.value = transcript;
       } else if (!transcript && !recorder.speechSupported) {
-        showToast(t("noTranscript"));
+        showToast(t("noTranscript"), "warning");
       }
     }
   }
@@ -1525,7 +1567,7 @@ document.getElementById("reRecordBtn").addEventListener("click", () => {
 
 document.getElementById("transcribeBtn").addEventListener("click", () => {
   if (!pendingTranscript) {
-    showToast(t("noTranscript"));
+    showToast(t("noTranscript"), "warning");
     return;
   }
   const textarea = document.getElementById("observationText");
@@ -1567,12 +1609,12 @@ window.addEventListener("online", flushPendingSaves);
 async function saveCurrentObservation(extraFields) {
   const text = document.getElementById("observationText").value.trim();
   if (!text) {
-    showToast(t("needText"));
+    showToast(t("needText"), "warning");
     return false;
   }
   const spotLocation = document.getElementById("observationSpotLocation").value.trim();
   if (!spotLocation) {
-    showToast(t("needSpotLocation"));
+    showToast(t("needSpotLocation"), "warning");
     return false;
   }
 
@@ -1597,7 +1639,7 @@ async function saveCurrentObservation(extraFields) {
   // Optimistic UI: reflect the save immediately and move on. The actual
   // IndexedDB write happens in the background and retries on its own —
   // the user is never blocked or shown a failure for this.
-  showToast(extraFields && extraFields.pendingAI ? t("offlineAnalyzeSaved") : t("observationSaved"));
+  showToast(extraFields && extraFields.pendingAI ? t("offlineAnalyzeSaved") : t("observationSaved"), "success");
   await renderReportScreen();
   showScreen("screen-report");
 
@@ -1643,7 +1685,7 @@ function aiErrorMessage(errData) {
 document.getElementById("analyzeAIBtn").addEventListener("click", async () => {
   const text = document.getElementById("observationText").value.trim();
   if (!text && stagedPhotos.length === 0) {
-    showToast(t("aiNeedInput"));
+    showToast(t("aiNeedInput"), "warning");
     return;
   }
 
@@ -1670,7 +1712,7 @@ document.getElementById("analyzeAIBtn").addEventListener("click", async () => {
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
       console.error("AI analyze error:", errData);
-      showToast(aiErrorMessage(errData));
+      showToast(aiErrorMessage(errData), "error");
       return;
     }
 
@@ -1678,7 +1720,7 @@ document.getElementById("analyzeAIBtn").addEventListener("click", async () => {
     openAIReviewScreen(result);
   } catch (err) {
     console.error(err);
-    showToast(t("aiAnalyzeFailed"));
+    showToast(t("aiAnalyzeFailed"), "error");
   } finally {
     analyzingMsg.style.display = "none";
     btn.disabled = false;
@@ -1770,7 +1812,7 @@ document.getElementById("analyzePendingBtn").addEventListener("click", async () 
   await saveReport(activeReport);
   btn.disabled = false;
   btn.textContent = originalLabel;
-  showToast(t("analyzingPendingDone")(successCount, pendingObs.length));
+  showToast(t("analyzingPendingDone")(successCount, pendingObs.length), "success");
   await renderReportScreen();
 });
 
@@ -1809,7 +1851,7 @@ document.getElementById("previewBackBtn").addEventListener("click", () => showSc
 // ---------- PDF ----------
 async function handleGeneratePdf() {
   if (!activeReport.observations.length) {
-    showToast(t("noObservationsForPdf"));
+    showToast(t("noObservationsForPdf"), "warning");
     return;
   }
   try {
@@ -1827,16 +1869,16 @@ async function handleGeneratePdf() {
     // ...and always leave a visible, tappable link too, in case the
     // automatic download was silently blocked (common on iPhone Safari).
     showPdfFallbackLink(url, fileName);
-    showToast(t("pdfSuccess"));
+    showToast(t("pdfSuccess"), "success");
   } catch (err) {
     console.error(err);
-    showToast(t("pdfFailed"));
+    showToast(t("pdfFailed"), "error");
   }
 }
 
 async function handleSharePdf() {
   if (!activeReport.observations.length) {
-    showToast(t("noObservationsForPdf"));
+    showToast(t("noObservationsForPdf"), "warning");
     return;
   }
   try {
@@ -1849,7 +1891,7 @@ async function handleSharePdf() {
     }
   } catch (err) {
     console.error(err);
-    showToast(t("pdfFailed"));
+    showToast(t("pdfFailed"), "error");
   }
 }
 document.getElementById("sharePdfBtn").addEventListener("click", handleSharePdf);
@@ -1898,7 +1940,7 @@ document.getElementById("savePhotoSettingsBtn").addEventListener("click", async 
     footerText: document.getElementById("footerTextInput").value.trim() || defaultPhotoSettings().footerText
   };
   await saveReport(activeReport);
-  showToast(currentLang === "ar" ? "تم حفظ الإعدادات." : "Settings saved.");
+  showToast(currentLang === "ar" ? "تم حفظ الإعدادات." : "Settings saved.", "success");
   showScreen("screen-report");
 });
 
