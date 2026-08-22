@@ -139,7 +139,16 @@ function sanitizeFileNamePart(str) {
 // Crops (never stretches) a source blob to exactly match targetRatio,
 // returns a JPEG Blob at a fixed comfortable resolution — same
 // cover-crop principle used elsewhere in this app for PDF photos.
-function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000) {
+//
+// When `lines` is given (non-empty), also burns the same semi-transparent
+// info bar photodoc.js's createDocumentedPhoto() already draws for the
+// in-app "documented photo" preview — same style, just sized for this
+// frame's own aspect ratio instead of always forcing a square, since the
+// template's photo frames aren't square. This is what puts each photo's
+// already-associated school name + date onto the photo itself in the
+// exported PowerPoint; the original blob is never touched, only this
+// generated copy.
+function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000, lines = [], isRtl = true) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onerror = reject;
@@ -165,6 +174,29 @@ function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000) {
       }
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetWidth, targetHeight);
+
+      if (lines && lines.length) {
+        const fontSize = Math.max(18, Math.round(targetWidth * 0.032));
+        const lineGap = Math.round(fontSize * 0.5);
+        const paddingY = Math.round(fontSize * 0.6);
+        const barHeight = lines.length * (fontSize + lineGap) + paddingY * 2 - lineGap;
+        const barY = targetHeight - barHeight;
+
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.fillRect(0, barY, targetWidth, barHeight);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.direction = isRtl ? "rtl" : "ltr";
+        ctx.textAlign = isRtl ? "right" : "left";
+        ctx.font = `600 ${fontSize}px Geeza Pro, Cairo, Arial, sans-serif`;
+        const paddingX = Math.round(targetWidth * 0.025);
+        let ty = barY + paddingY + fontSize * 0.8;
+        lines.forEach((line) => {
+          ctx.fillText(line, isRtl ? targetWidth - paddingX : paddingX, ty);
+          ty += fontSize + lineGap;
+        });
+      }
+
       canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/jpeg", 0.88);
     };
     img.src = URL.createObjectURL(sourceBlob);
@@ -254,6 +286,13 @@ async function generateMonthlyPptx(school, monthKey) {
   const zip = await JSZip.loadAsync(templateBuffer);
   const byLabel = groupFilledSlotsByLabel(slots, submission);
 
+  // Same school name + documentation date already shown on each photo's
+  // "documented" preview in-app (see monthly.js's monthlyOverlayLines()),
+  // reused as-is so the exported photos carry the same associated
+  // metadata as the app already displays for them.
+  const overlayLines = monthlyOverlayLines(school.name, submission.visitDate);
+  const overlayIsRtl = currentLang === "ar";
+
   // 1) Swap photo bytes — only for slots that actually have a photo.
   //    Missing ones keep the template's original example photo, by design.
   for (const [label, targets] of Object.entries(PPTX_IMAGE_MAP)) {
@@ -262,7 +301,7 @@ async function generateMonthlyPptx(school, monthKey) {
       const filledEntry = filled[i];
       if (!filledEntry) continue; // leave this specific frame's original photo untouched
       const target = targets[i];
-      const cropped = await cropImageToRatio(filledEntry.entry.blob, target.ratio);
+      const cropped = await cropImageToRatio(filledEntry.entry.blob, target.ratio, 1000, overlayLines, overlayIsRtl);
       const arrayBuf = await cropped.arrayBuffer();
       zip.file(`ppt/media/${target.media}`, arrayBuf);
     }
@@ -355,6 +394,8 @@ async function generateMultiSchoolPptx(schools, monthKey) {
     const school = schools[i];
     const submission = await getMonthlySubmission(school.id, monthKey);
     const byLabel = groupFilledSlotsByLabel(slots, submission);
+    const overlayLines = monthlyOverlayLines(school.name, submission.visitDate);
+    const overlayIsRtl = currentLang === "ar";
 
     let slideXml = await applySlideTextReplacements(originalSlideXml, school, monthKey);
     let slideRelsXml = originalSlideRelsXml;
@@ -368,7 +409,7 @@ async function generateMultiSchoolPptx(schools, monthKey) {
         const filledEntry = filled[t];
         if (!filledEntry) continue;
         const target = targets[t];
-        const cropped = await cropImageToRatio(filledEntry.entry.blob, target.ratio);
+        const cropped = await cropImageToRatio(filledEntry.entry.blob, target.ratio, 1000, overlayLines, overlayIsRtl);
         const arrayBuf = await cropped.arrayBuffer();
         const newMediaPath = `ppt/media/s${i}_${target.media}`;
         zip.file(newMediaPath, arrayBuf);
