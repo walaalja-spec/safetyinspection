@@ -3,5 +3,34 @@ main = "worker.js"
 compatibility_date = "2026-01-01"
 
 [assets]
-directory = "."
 binding = "ASSETS"
+directory = "."
+
+# ---------------------------------------------------------------------
+# Phase 3 — cloud data layer (D1 + R2), real resource identifiers.
+#
+# database_name/database_id/bucket_name below point at the real D1
+# database and R2 bucket created manually on the Cloudflare account
+# (given directly by the project owner — not invented, not auto-created
+# by any command run from this environment).
+#
+# Nothing has been verified against the real Cloudflare account from
+# this environment: this sandbox has no CLOUDFLARE_API_TOKEN or other
+# Cloudflare credentials, so `wrangler d1 execute --remote` /
+# `wrangler r2 bucket` calls haven't been (and can't be) run here.
+# The schema in migrations/0001_init.sql has NOT been applied to this
+# real database yet. See PHASE2_MIGRATION_PLAN.md — no migration of
+# real IndexedDB data has been run, and none will be until explicitly
+# approved.
+#
+# The frontend still runs entirely on IndexedDB; nothing calls /api/*
+# yet, so these bindings currently have no effect on deployed behavior.
+# ---------------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "school-inspection-db"
+database_id = "8a82e00d-06dc-4a66-bf80-7e5b143338a7"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "school-inspection-photos"
