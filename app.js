@@ -70,6 +70,8 @@ let isRecording = false;
 let editingAIFields = {}; // preserves previously-approved AI fields when re-saving without re-running AI
 let followUpCaptureIndex = null; // observation index currently capturing an after-fix photo
 let followUpOpenIndices = new Set(); // which observations' follow-up panels are expanded (survives re-renders)
+let isSavingObservation = false; // guards against double-submit (multi-click, or a retry while a save is already in flight)
+let pendingNewObsIndex = null;   // for a NEW observation whose save failed: the array index it already occupies, so a retry overwrites it instead of pushing a duplicate
 const recorder = new VoiceRecorder();
 
 // ---------- Translations ----------
@@ -306,7 +308,10 @@ const translations = {
     followUpMarkNotFixed: "↩️ لم يتم الإصلاح",
     followUpVerificationDateLabel: "تاريخ التحقق",
     followUpNotePlaceholder: "ملاحظة التحقق (اختياري)",
-    followUpPhotoSaved: "تم حفظ صورة ما بعد الإصلاح."
+    followUpPhotoSaved: "تم حفظ صورة ما بعد الإصلاح.",
+    savingObservation: "⏳ جاري الحفظ...",
+    btnRetrySaveObservation: "🔄 إعادة المحاولة",
+    observationSaveFailed: "تعذر حفظ الملاحظة. البيانات محفوظة مؤقتًا، حاول مرة أخرى."
   },
   en: {
     appTitle: "WJ Safety",
@@ -540,7 +545,10 @@ const translations = {
     followUpMarkNotFixed: "↩️ Not fixed",
     followUpVerificationDateLabel: "Verification date",
     followUpNotePlaceholder: "Verification note (optional)",
-    followUpPhotoSaved: "After-fix photo saved."
+    followUpPhotoSaved: "After-fix photo saved.",
+    savingObservation: "⏳ Saving...",
+    btnRetrySaveObservation: "🔄 Retry",
+    observationSaveFailed: "Couldn't save the observation. Your data is kept -- try again."
   }
 };
 
@@ -1529,6 +1537,9 @@ function resetObservationForm() {
 
 function openObservationEditor(index) {
   editingIndex = index;
+  pendingNewObsIndex = null;
+  isSavingObservation = false;
+  setObservationSaveUI("idle");
   resetObservationForm();
   editingAIFields = {};
 
@@ -1771,11 +1782,16 @@ document.getElementById("transcribeBtn").addEventListener("click", () => {
 });
 
 // ---- Save observation ----
-// ---------- Optimistic, resilient observation saving ----------
-// storage.js already retries a failed IndexedDB write 3x internally.
-// If it still fails (rare), we queue the report and keep retrying in
-// the background instead of ever blocking the user or showing a dead-end
-// failure message — the UI has already moved on by the time this runs.
+// ---------- Resilient observation saving ----------
+// The UI only advances (toast + list re-render + navigate back to the
+// report) *after* the IndexedDB write is confirmed. storage.js's
+// saveReport() already retries a failed write 3x internally with backoff;
+// this function awaits that real result instead of assuming it succeeded.
+// If every internal retry is exhausted, the observation is NOT discarded:
+// the form stays exactly as the user left it (no reset, no navigation),
+// a clear error + a "retry" button are shown, and the report is queued so
+// flushPendingSaves keeps retrying in the background even if the user
+// navigates away without pressing retry.
 const pendingSaveQueue = new Map(); // reportId -> report object awaiting a successful DB write
 
 async function persistReportResilient(report) {
@@ -1799,7 +1815,27 @@ async function flushPendingSaves() {
 setInterval(flushPendingSaves, 15000);
 window.addEventListener("online", flushPendingSaves);
 
+function setObservationSaveUI(state) {
+  const saveBtn = document.getElementById("saveObservationBtn");
+  const approveBtn = document.getElementById("aiApproveBtn");
+  if (state === "saving") {
+    saveBtn.disabled = true;
+    if (approveBtn) approveBtn.disabled = true;
+    saveBtn.textContent = t("savingObservation");
+  } else if (state === "error") {
+    saveBtn.disabled = false;
+    if (approveBtn) approveBtn.disabled = false;
+    saveBtn.textContent = t("btnRetrySaveObservation");
+  } else {
+    saveBtn.disabled = false;
+    if (approveBtn) approveBtn.disabled = false;
+    saveBtn.textContent = t("btnSaveObservation");
+  }
+}
+
 async function saveCurrentObservation(extraFields) {
+  if (isSavingObservation) return false; // a save is already in flight -- ignore extra clicks/retries
+
   const text = document.getElementById("observationText").value.trim();
   if (!text) {
     showToast(t("needText"), "warning");
@@ -1812,7 +1848,13 @@ async function saveCurrentObservation(extraFields) {
   }
 
   const manualCategory = document.getElementById("observationCategorySelect").value;
-  const existingObs = editingIndex !== null ? activeReport.observations[editingIndex] : null;
+  // A retry after a failed save reuses the same array slot instead of
+  // pushing a new entry, so multiple clicks/retries never create
+  // duplicate observations.
+  const targetIndex = editingIndex !== null
+    ? editingIndex
+    : (pendingNewObsIndex !== null ? pendingNewObsIndex : activeReport.observations.length);
+  const existingObs = activeReport.observations[targetIndex] || null;
 
   const obs = {
     text,
@@ -1828,21 +1870,37 @@ async function saveCurrentObservation(extraFields) {
     ...(extraFields || {})
   };
 
-  if (editingIndex !== null) {
-    activeReport.observations[editingIndex] = obs;
-  } else {
-    activeReport.observations.push(obs);
+  activeReport.observations[targetIndex] = obs;
+  if (editingIndex === null) pendingNewObsIndex = targetIndex;
+
+  isSavingObservation = true;
+  setObservationSaveUI("saving");
+
+  try {
+    // Awaits the real, confirmed write (storage.js already retries
+    // transient failures internally) -- nothing below this line runs
+    // until the save has actually succeeded.
+    await saveReport(activeReport);
+    pendingSaveQueue.delete(activeReport.id);
+    pendingNewObsIndex = null;
+    isSavingObservation = false;
+    setObservationSaveUI("idle");
+
+    showToast(extraFields && extraFields.pendingAI ? t("offlineAnalyzeSaved") : t("observationSaved"), "success");
+    await renderReportScreen();
+    showScreen("screen-report");
+    return true;
+  } catch (err) {
+    console.error("Failed to save observation after internal retries:", err);
+    isSavingObservation = false;
+    setObservationSaveUI("error");
+    showToast(t("observationSaveFailed"), "error");
+    // Keep retrying in the background too, in case the user navigates
+    // away instead of pressing retry -- the typed text, photos, and
+    // every other field are untouched either way (no reset, no navigate).
+    pendingSaveQueue.set(activeReport.id, activeReport);
+    return false;
   }
-
-  // Optimistic UI: reflect the save immediately and move on. The actual
-  // IndexedDB write happens in the background and retries on its own —
-  // the user is never blocked or shown a failure for this.
-  showToast(extraFields && extraFields.pendingAI ? t("offlineAnalyzeSaved") : t("observationSaved"), "success");
-  await renderReportScreen();
-  showScreen("screen-report");
-
-  persistReportResilient(activeReport);
-  return true;
 }
 
 document.getElementById("saveObservationBtn").addEventListener("click", () => saveCurrentObservation());
