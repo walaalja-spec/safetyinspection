@@ -274,6 +274,23 @@ const PHOTO_TYPES = new Set(["original", "before", "after", "monthly", "audio"])
 const OWNER_TYPES = new Set(["observation", "monthly_submission"]);
 const MAX_PHOTO_BYTES = 15_000_000;
 
+// Not the eventual real auth system for /api/* — just a stopgap so the
+// D1/R2-backed endpoints aren't wide open on Cloudflare's auto-deployed
+// preview URLs before the frontend (and a real auth design) exists. Set
+// via `wrangler secret put API_INTERNAL_KEY` (per environment) — never
+// hardcode a value here or in wrangler.toml.
+function isAuthorizedApiRequest(request, env) {
+  const expected = env.API_INTERNAL_KEY;
+  if (!expected) return false;
+  const provided = request.headers.get("X-Api-Key");
+  if (!provided || provided.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= expected.charCodeAt(i) ^ provided.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 function extFromContentType(ct) {
   const map = {
     "image/jpeg": "jpg",
@@ -329,6 +346,17 @@ async function deletePhotoRefsForOwner(env, ownerType, ownerId) {
 async function handleApi(request, env, url) {
   if (!isAllowedOrigin(request, url.origin)) {
     return apiErr("forbidden", 403);
+  }
+  // Cloudflare's Git integration auto-deploys a public preview URL for
+  // every push (observed directly: a preview build went live for this
+  // branch without anyone running `wrangler deploy`). isAllowedOrigin
+  // alone doesn't stop a direct request with no Origin/Referer header, so
+  // without this gate that preview URL's /api/* — including R2 photo
+  // upload — is reachable by anyone who has the link. Fails closed: no
+  // API_INTERNAL_KEY secret configured means every request is rejected,
+  // not allowed through.
+  if (!isAuthorizedApiRequest(request, env)) {
+    return apiErr("unauthorized", 401);
   }
   if (!env.DB || !env.BUCKET) {
     return apiErr("cloud_storage_not_configured", 500);
