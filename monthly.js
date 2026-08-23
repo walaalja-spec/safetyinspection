@@ -261,10 +261,19 @@ async function renderMonthlySlotsGrid() {
   });
   grid.querySelectorAll(".monthly-slot-remove-photo").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      const removed = activeSubmission.photos[btn.dataset.slot];
       delete activeSubmission.photos[btn.dataset.slot];
-      await saveMonthlySubmission(activeSubmission);
+      const ok = await persistMonthlySubmissionResilient(activeSubmission);
+      if (!ok) {
+        // Keep it removed from the UI's perspective (matches user intent)
+        // but the underlying write is queued and will retry in the
+        // background -- surfacing this as a hard failure with the photo
+        // restored would be more confusing than reassuring here.
+        console.error("Failed to persist photo deletion after internal retries; queued for background retry.", removed);
+      }
       showToast(t("monthlyPhotoDeleted"), "success");
       await renderMonthlySlotsGrid();
+      updatePendingSaveIndicator();
     });
   });
   grid.querySelectorAll(".monthly-slot-save").forEach((btn) => {
@@ -280,23 +289,63 @@ async function renderMonthlySlotsGrid() {
   });
 }
 
+// ---------- Resilient monthly-submission saving ----------
+// Mirrors app.js's pendingSaveQueue/persistReportResilient/
+// flushPendingSaves pattern for reports: saveMonthlySubmission() already
+// retries a failed write internally (storage.js's storePut, same
+// withRetry() saveReport() uses), but if every retry is exhausted the
+// photo must not be silently lost -- it's queued here, and app.js's
+// flushPendingSaves() (already running on a 15s interval / 'online'
+// event) keeps retrying it in the background without any new timer.
+const pendingMonthlySaveQueue = new Map(); // submissionId -> submission object awaiting a successful write
+
+async function persistMonthlySubmissionResilient(submission) {
+  try {
+    await saveMonthlySubmission(submission);
+    pendingMonthlySaveQueue.delete(submission.id);
+    return true;
+  } catch (err) {
+    console.error("Persist failed for monthly submission after internal retries, queued for background retry:", err);
+    pendingMonthlySaveQueue.set(submission.id, submission);
+    return false;
+  }
+}
+
+async function flushPendingMonthlySaves() {
+  if (pendingMonthlySaveQueue.size === 0) return;
+  for (const [id, submission] of Array.from(pendingMonthlySaveQueue.entries())) {
+    await persistMonthlySubmissionResilient(submission);
+  }
+}
+
 async function handleMonthlyPhotoInput(e) {
   const file = e.target.files[0];
   e.target.value = "";
   if (!file || !captureSlotId) return;
+  const slotId = captureSlotId;
+  captureSlotId = null;
+
+  let blob;
   try {
     // Higher resolution/quality than the default report photos, since
     // these are official documentation photos that may be reviewed closely.
-    const blob = await compressImage(file, 2200, 0.92);
-    activeSubmission.photos[captureSlotId] = { blob, takenAt: Date.now() };
-    await saveMonthlySubmission(activeSubmission);
-    showToast(t("monthlyPhotoSaved"), "success");
-    await renderMonthlySlotsGrid();
+    blob = await compressImage(file, 2200, 0.92);
   } catch (err) {
-    console.error(err);
+    console.error("Failed to compress monthly photo:", err);
     showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.", "error");
+    return;
   }
-  captureSlotId = null;
+
+  // The photo is captured in memory (activeSubmission) and the grid is
+  // re-rendered from it *before* the write result is known -- the photo
+  // is never invisible/appears-lost even if the save is still retrying
+  // in the background, and a hard refresh only risks it if the write
+  // truly never lands (rare: 3 internal retries + this background queue).
+  activeSubmission.photos[slotId] = { blob, takenAt: Date.now() };
+  const ok = await persistMonthlySubmissionResilient(activeSubmission);
+  await renderMonthlySlotsGrid();
+  showToast(ok ? t("monthlyPhotoSaved") : t("monthlySaveFailedQueued"), ok ? "success" : "warning");
+  updatePendingSaveIndicator();
 }
 document.getElementById("monthlyCameraInput").addEventListener("change", handleMonthlyPhotoInput);
 document.getElementById("monthlyGalleryInput").addEventListener("change", handleMonthlyPhotoInput);

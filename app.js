@@ -186,6 +186,9 @@ const translations = {
     monthlySlotsSaved: "تم حفظ التعديلات.",
     monthlyPhotoSaved: "تم حفظ الصورة.",
     monthlyPhotoDeleted: "تم حذف الصورة.",
+    monthlySaveFailedQueued: "تعذر حفظ الصورة الآن. الصورة محفوظة مؤقتًا وسيُعاد المحاولة تلقائيًا.",
+    pendingSaveIndicator: (n) => `🔄 ${n} ${n === 1 ? "عنصر بانتظار الحفظ" : "عناصر بانتظار الحفظ"}`,
+    draftRestored: "↩️ تمت استعادة تعديلاتك غير المحفوظة.",
     monthlySlotLabelPlaceholder: "مثال: واجهة المدرسة",
     btnMonthlyCamera: "📷",
     btnMonthlyGallery: "🖼",
@@ -423,6 +426,9 @@ const translations = {
     monthlySlotsSaved: "Changes saved.",
     monthlyPhotoSaved: "Photo saved.",
     monthlyPhotoDeleted: "Photo deleted.",
+    monthlySaveFailedQueued: "Couldn't save the photo right now. It's kept and will retry automatically.",
+    pendingSaveIndicator: (n) => `🔄 ${n} item${n === 1 ? "" : "s"} waiting to save`,
+    draftRestored: "↩️ Your unsaved changes were restored.",
     monthlySlotLabelPlaceholder: "e.g. School entrance",
     btnMonthlyCamera: "📷",
     btnMonthlyGallery: "🖼",
@@ -1535,6 +1541,59 @@ function resetObservationForm() {
   document.getElementById("galleryInput").value = "";
 }
 
+// ---------- Draft auto-save ----------
+// Protects in-progress text/photos/audio *before* "Save" is ever pressed
+// (a refresh, closed tab, or crash mid-edit shouldn't lose it) by
+// periodically snapshotting the open form into activeReport.draft and
+// writing it through the same resilient path (persistReportResilient)
+// already used for real observation saves — no new storage system, same
+// report record, same retry/queue machinery.
+let draftAutosaveTimer = null;
+
+function applyObservationDataToForm({ text, spotLocation, category, photos, audioBlob }) {
+  document.getElementById("observationText").value = text || "";
+  document.getElementById("observationSpotLocation").value = spotLocation || "";
+  document.getElementById("observationCategorySelect").value = category || "";
+  stagedPhotos = [...(photos || [])];
+  renderPhotosGrid();
+  if (audioBlob) {
+    stagedAudioBlob = audioBlob;
+    showAudioPreview(audioBlob);
+  }
+}
+
+function saveDraftNow() {
+  if (!activeReport) return;
+  activeReport.draft = {
+    editingIndex,
+    text: document.getElementById("observationText").value,
+    spotLocation: document.getElementById("observationSpotLocation").value,
+    category: document.getElementById("observationCategorySelect").value,
+    photos: stagedPhotos,
+    audioBlob: stagedAudioBlob || null,
+    updatedAt: Date.now()
+  };
+  persistReportResilient(activeReport); // best-effort background write; already resilient (internal retries + queued fallback)
+}
+
+function scheduleDraftAutosave() {
+  clearTimeout(draftAutosaveTimer);
+  draftAutosaveTimer = setTimeout(saveDraftNow, 1200);
+}
+
+function clearDraft() {
+  clearTimeout(draftAutosaveTimer);
+  if (activeReport && activeReport.draft) {
+    delete activeReport.draft;
+    persistReportResilient(activeReport);
+  }
+}
+
+["observationText", "observationSpotLocation"].forEach((id) => {
+  document.getElementById(id).addEventListener("input", scheduleDraftAutosave);
+});
+document.getElementById("observationCategorySelect").addEventListener("change", scheduleDraftAutosave);
+
 function openObservationEditor(index) {
   editingIndex = index;
   pendingNewObsIndex = null;
@@ -1547,17 +1606,15 @@ function openObservationEditor(index) {
   document.getElementById("observationHeading").textContent =
     (currentLang === "ar" ? "الملاحظة رقم " : "Observation #") + number;
 
-  if (index !== null) {
-    const obs = activeReport.observations[index];
-    document.getElementById("observationText").value = obs.text || "";
-    document.getElementById("observationSpotLocation").value = obs.spotLocation || "";
-    document.getElementById("observationCategorySelect").value = obs.category || "";
-    stagedPhotos = [...obsPhotos(obs)];
-    renderPhotosGrid();
-    if (obs.audioBlob) {
-      stagedAudioBlob = obs.audioBlob;
-      showAudioPreview(obs.audioBlob);
-    }
+  const obs = index !== null ? activeReport.observations[index] : null;
+  if (obs) {
+    applyObservationDataToForm({
+      text: obs.text,
+      spotLocation: obs.spotLocation,
+      category: obs.category,
+      photos: obsPhotos(obs),
+      audioBlob: obs.audioBlob
+    });
     if (obs.category) {
       editingAIFields = {
         category: obs.category,
@@ -1569,6 +1626,16 @@ function openObservationEditor(index) {
     }
   }
 
+  // A draft only ever exists for the single most-recently-open form, tagged
+  // by which observation it belongs to (null = a new, not-yet-saved one) —
+  // restoring it here means a refresh/crash mid-edit picks up right where
+  // the user left off instead of losing the unsaved changes.
+  const draft = activeReport.draft && activeReport.draft.editingIndex === index ? activeReport.draft : null;
+  if (draft) {
+    applyObservationDataToForm(draft);
+    showToast(t("draftRestored"), "success");
+  }
+
   showScreen("screen-observation");
 }
 
@@ -1578,6 +1645,7 @@ document.getElementById("cancelObservationBtn").addEventListener("click", async 
     await recorder.stop();
     isRecording = false;
   }
+  clearDraft(); // explicit discard -- the user chose to abandon this edit
   showScreen("screen-report");
 });
 
@@ -1599,6 +1667,7 @@ function renderPhotosGrid() {
     btn.addEventListener("click", () => {
       stagedPhotos.splice(parseInt(btn.dataset.i, 10), 1);
       renderPhotosGrid();
+      scheduleDraftAutosave();
     });
   });
   grid.querySelectorAll(".photo-thumb-more").forEach((btn) => {
@@ -1626,6 +1695,7 @@ async function handlePhotoInput(e) {
       }
     }
     renderPhotosGrid();
+    scheduleDraftAutosave();
   } catch (err) {
     console.error(err);
     showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.", "error");
@@ -1687,6 +1757,7 @@ document.getElementById("actionDeletePhoto").addEventListener("click", () => {
   stagedPhotos.splice(modalPhotoIndex, 1);
   closePhotoActionModal();
   renderPhotosGrid();
+  scheduleDraftAutosave();
 });
 
 document.getElementById("actionSaveOriginal").addEventListener("click", async () => {
@@ -1753,6 +1824,7 @@ document.getElementById("recordBtn").addEventListener("click", async () => {
       } else if (!transcript && !recorder.speechSupported) {
         showToast(t("noTranscript"), "warning");
       }
+      scheduleDraftAutosave();
     }
   }
 });
@@ -1761,6 +1833,7 @@ document.getElementById("deleteAudioBtn").addEventListener("click", () => {
   stagedAudioBlob = null;
   pendingTranscript = "";
   document.getElementById("audioPlaybackBox").style.display = "none";
+  scheduleDraftAutosave();
 });
 
 document.getElementById("reRecordBtn").addEventListener("click", () => {
@@ -1798,19 +1871,46 @@ async function persistReportResilient(report) {
   try {
     await saveReport(report);
     pendingSaveQueue.delete(report.id);
+    updatePendingSaveIndicator();
     return true;
   } catch (err) {
     console.error("Persist failed after internal retries, queued for background retry:", err);
     pendingSaveQueue.set(report.id, report);
+    updatePendingSaveIndicator();
     return false;
   }
 }
 
-async function flushPendingSaves() {
-  if (pendingSaveQueue.size === 0) return;
-  for (const [id, report] of Array.from(pendingSaveQueue.entries())) {
-    await persistReportResilient(report);
+// Small, non-intrusive indicator: visible only while at least one write
+// (report, monthly-photo submission, or scene status) is queued for a
+// background retry. Every queue-mutating call site (success or failure)
+// calls this so the badge appears/disappears immediately rather than
+// waiting for the next 15s interval tick.
+function updatePendingSaveIndicator() {
+  const el = document.getElementById("pendingSaveIndicator");
+  const count = pendingSaveQueue.size + pendingMonthlySaveQueue.size + pendingSceneSaveQueue.size;
+  if (count > 0) {
+    el.textContent = t("pendingSaveIndicator")(count);
+    el.style.display = "flex";
+  } else {
+    el.style.display = "none";
   }
+}
+
+async function flushPendingSaves() {
+  if (pendingSaveQueue.size > 0) {
+    for (const [id, report] of Array.from(pendingSaveQueue.entries())) {
+      await persistReportResilient(report);
+    }
+  }
+  // monthly.js and scenes.js each define an analogous queue+flush pair
+  // (monthly-photo submissions, scene-tracking status) and are both
+  // loaded before this interval ever fires, so they're always defined by
+  // the time this runs -- reuses this same interval/'online' trigger
+  // instead of running extra background timers per feature.
+  await flushPendingMonthlySaves();
+  await flushPendingSceneSaves();
+  updatePendingSaveIndicator();
 }
 setInterval(flushPendingSaves, 15000);
 window.addEventListener("online", flushPendingSaves);
@@ -1875,6 +1975,13 @@ async function saveCurrentObservation(extraFields) {
 
   isSavingObservation = true;
   setObservationSaveUI("saving");
+  // The real observation now supersedes any in-progress draft for this
+  // same slot -- clearing it here means the write below both saves the
+  // observation and drops the now-redundant draft in one atomic call.
+  if (activeReport.draft && activeReport.draft.editingIndex === editingIndex) {
+    clearTimeout(draftAutosaveTimer);
+    delete activeReport.draft;
+  }
 
   try {
     // Awaits the real, confirmed write (storage.js already retries
@@ -1899,6 +2006,7 @@ async function saveCurrentObservation(extraFields) {
     // away instead of pressing retry -- the typed text, photos, and
     // every other field are untouched either way (no reset, no navigate).
     pendingSaveQueue.set(activeReport.id, activeReport);
+    updatePendingSaveIndicator();
     return false;
   }
 }

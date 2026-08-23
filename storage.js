@@ -429,23 +429,34 @@ async function storeGet(storeName, id) {
   });
 }
 
+// Same internal retry (withRetry) that saveReport() already relies on —
+// covers the same transient failures (a brief lock, a just-dropped
+// connection) for every other store (monthly schools/template/
+// submissions, scene tracking/templates) instead of failing on the
+// first hiccup.
 async function storePut(storeName, record) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).put(record);
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error);
+  return withRetry(async () => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite");
+      tx.objectStore(storeName).put(record);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
+    });
   });
 }
 
 async function storeDelete(storeName, id) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).delete(id);
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error);
+  return withRetry(async () => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite");
+      tx.objectStore(storeName).delete(id);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
+    });
   });
 }
 

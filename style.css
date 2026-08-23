@@ -427,6 +427,20 @@ html[dir="ltr"] select { background-position: right 14px center; }
 
 .pdf-link { text-align: center; text-decoration: none; box-sizing: border-box; }
 
+/* ---------- Pending-save indicator ---------- */
+/* Small, non-intrusive: only ever visible while at least one write is
+   queued for a background retry (see pendingSaveQueue et al.) — hidden
+   the rest of the time, never implies anything is lost. */
+.pending-save-indicator {
+  position: fixed; top: max(12px, env(safe-area-inset-top)); left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 6px;
+  background: var(--amber-100); color: #7a5c00;
+  border: 1px solid #f0ddac;
+  padding: 7px 16px; border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 800;
+  box-shadow: var(--shadow-2); z-index: 45; max-width: 90%; text-align: center;
+}
+
 /* ---------- AI review ---------- */
 .ai-visual-note {
   background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: var(--r-lg);

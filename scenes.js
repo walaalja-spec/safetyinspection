@@ -43,9 +43,13 @@ document.getElementById("openSceneTrackingBtn").addEventListener("click", async 
   await renderSceneTrackingScreen();
 });
 
-async function renderSceneTrackingScreen() {
+// `preloadedTracking`, when passed, is rendered as-is instead of re-fetching
+// from IndexedDB -- used right after a save attempt so a write that's still
+// retrying in the background (queued, not yet confirmed) doesn't make the
+// screen revert the status the user just picked back to its old value.
+async function renderSceneTrackingScreen(preloadedTracking) {
   sceneList = await getSceneTemplate();
-  const tracking = await getSceneTracking(activeSceneSchool.id, activeSceneMonthKey);
+  const tracking = preloadedTracking || await getSceneTracking(activeSceneSchool.id, activeSceneMonthKey);
 
   document.getElementById("sceneTrackingSchoolName").textContent = activeSceneSchool.name;
   const isCurrent = activeSceneMonthKey === defaultSceneMonthKey();
@@ -93,6 +97,33 @@ async function renderSceneTrackingScreen() {
 
 const sceneStatusSaveInFlight = new Set(); // guards a double-tap on the same scene from racing itself
 
+// Same resilient-queue pattern as reports (app.js) and monthly photos
+// (monthly.js): saveSceneTracking() already retries a failed write
+// internally (storage.js's storePut), but if every retry is exhausted
+// the status change is queued here instead of being silently discarded —
+// app.js's flushPendingSaves() (already on a 15s interval / 'online'
+// event) retries it in the background.
+const pendingSceneSaveQueue = new Map(); // trackingId -> tracking object awaiting a successful write
+
+async function persistSceneTrackingResilient(tracking) {
+  try {
+    await saveSceneTracking(tracking);
+    pendingSceneSaveQueue.delete(tracking.id);
+    return true;
+  } catch (err) {
+    console.error("Persist failed for scene tracking after internal retries, queued for background retry:", err);
+    pendingSceneSaveQueue.set(tracking.id, tracking);
+    return false;
+  }
+}
+
+async function flushPendingSceneSaves() {
+  if (pendingSceneSaveQueue.size === 0) return;
+  for (const [id, tracking] of Array.from(pendingSceneSaveQueue.entries())) {
+    await persistSceneTrackingResilient(tracking);
+  }
+}
+
 async function setSceneStatus(sceneId, status) {
   if (sceneStatusSaveInFlight.has(sceneId)) return;
   sceneStatusSaveInFlight.add(sceneId);
@@ -104,8 +135,10 @@ async function setSceneStatus(sceneId, status) {
     history.push({ status, at: now });
     tracking.scenes[sceneId] = { status, updatedAt: now, history };
 
-    await saveSceneTracking(tracking);
-    await renderSceneTrackingScreen(); // instant refresh, no page reload
+    const ok = await persistSceneTrackingResilient(tracking);
+    await renderSceneTrackingScreen(tracking); // render the in-memory record, not a re-fetch -- stays correct even if the write is still retrying
+    if (!ok) showToast(t("monthlySaveFailedQueued"), "warning");
+    updatePendingSaveIndicator();
   } catch (err) {
     console.error("Failed to save scene status:", err);
     showToast(t("sceneSaveFailed"), "error");
