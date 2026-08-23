@@ -203,6 +203,19 @@ const translations = {
     pendingSaveIndicator: (n) => `🔄 ${n} ${n === 1 ? "عنصر بانتظار الحفظ" : "عناصر بانتظار الحفظ"}`,
     cloudSyncPending: (n) => `☁️ جاري مزامنة ${n} ${n === 1 ? "عنصر" : "عناصر"} مع السحابة`,
     cloudSyncNeedsAttention: "☁️ تعذّرت مزامنة بعض البيانات — البيانات محفوظة على جهازك وسيُعاد المحاولة",
+    cloudSyncSignInNeeded: "☁️ سجّلي الدخول لمزامنة بياناتك — بياناتك محفوظة على جهازك بأمان",
+    loginHeading: "تسجيل الدخول للمزامنة السحابية",
+    loginHint: "التطبيق يعمل بالكامل بدون تسجيل دخول. تسجيل الدخول مطلوب فقط لمزامنة بياناتك مع النسخة الاحتياطية السحابية.",
+    loginPasswordLabel: "كلمة المرور",
+    btnLogin: "تسجيل الدخول",
+    btnCloudSignIn: "☁️ تسجيل الدخول للمزامنة",
+    btnCloudSignOut: "☁️ تسجيل الخروج من المزامنة",
+    loginSigningIn: "جاري تسجيل الدخول...",
+    loginBadPassword: "كلمة المرور غير صحيحة.",
+    loginTooMany: "محاولات كثيرة. انتظري ١٥ دقيقة ثم حاولي مرة أخرى.",
+    loginNetworkError: "تعذر الاتصال. بياناتك محفوظة على جهازك ولن تُفقد.",
+    loginSuccess: "تم تسجيل الدخول. ستبدأ المزامنة تلقائيًا.",
+    loggedOut: "تم تسجيل الخروج. بياناتك لا تزال محفوظة على جهازك.",
     draftRestored: "↩️ تمت استعادة تعديلاتك غير المحفوظة.",
     monthlySlotLabelPlaceholder: "مثال: واجهة المدرسة",
     btnMonthlyCamera: "📷",
@@ -458,6 +471,19 @@ const translations = {
     pendingSaveIndicator: (n) => `🔄 ${n} item${n === 1 ? "" : "s"} waiting to save`,
     cloudSyncPending: (n) => `☁️ Syncing ${n} item${n === 1 ? "" : "s"} to the cloud`,
     cloudSyncNeedsAttention: "☁️ Couldn't sync some data yet — it's saved on your device and will retry automatically",
+    cloudSyncSignInNeeded: "☁️ Sign in to sync — your data is saved safely on this device",
+    loginHeading: "Sign in for cloud sync",
+    loginHint: "The app works fully without signing in. Signing in is only needed to sync your data to the cloud backup.",
+    loginPasswordLabel: "Password",
+    btnLogin: "Sign in",
+    btnCloudSignIn: "☁️ Sign in for cloud sync",
+    btnCloudSignOut: "☁️ Sign out of cloud sync",
+    loginSigningIn: "Signing in...",
+    loginBadPassword: "Incorrect password.",
+    loginTooMany: "Too many attempts. Wait 15 minutes and try again.",
+    loginNetworkError: "Couldn't connect. Your data is saved on this device and won't be lost.",
+    loginSuccess: "Signed in. Syncing will start automatically.",
+    loggedOut: "Signed out. Your data is still saved on this device.",
     draftRestored: "↩️ Your unsaved changes were restored.",
     monthlySlotLabelPlaceholder: "e.g. School entrance",
     btnMonthlyCamera: "📷",
@@ -1305,6 +1331,97 @@ async function renderDataDiagnostic(keyword) {
     resultsEl.appendChild(card);
   });
 }
+
+// ---------- Cloud sign-in ----------
+// Gates CLOUD SYNC only. The app itself never requires a login: every
+// screen, every save, and all existing data stay fully usable offline
+// whether signed in or not. If the Worker reports that auth isn't
+// configured at all, the entry point stays hidden and nothing changes.
+let cloudAuthState = { authenticated: false, configured: false };
+
+async function refreshCloudAuthState() {
+  try {
+    const res = await fetch("/api/auth/session");
+    const json = await res.json();
+    if (json && json.success) cloudAuthState = json.data;
+  } catch (e) {
+    // Offline, or no cloud layer reachable -- leave the last known state
+    // and stay silent. This must never interrupt normal offline use.
+  }
+  const btn = document.getElementById("cloudAuthBtn");
+  if (!btn) return;
+  if (!cloudAuthState.configured) {
+    btn.style.display = "none";
+    return;
+  }
+  btn.style.display = "";
+  btn.textContent = cloudAuthState.authenticated ? t("btnCloudSignOut") : t("btnCloudSignIn");
+}
+
+document.getElementById("cloudAuthBtn").addEventListener("click", async () => {
+  if (cloudAuthState.authenticated) {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      showToast(t("loggedOut"), "success");
+    } catch (e) {
+      showToast(t("loginNetworkError"), "error");
+    }
+    await refreshCloudAuthState();
+    return;
+  }
+  document.getElementById("loginPassword").value = "";
+  document.getElementById("loginError").style.display = "none";
+  showScreen("screen-login");
+});
+
+document.getElementById("loginBackBtn").addEventListener("click", () => showScreen("screen-home"));
+
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("loginSubmitBtn");
+  const errEl = document.getElementById("loginError");
+  const password = document.getElementById("loginPassword").value;
+  if (!password) return;
+
+  btn.disabled = true;
+  btn.textContent = t("loginSigningIn");
+  errEl.style.display = "none";
+
+  let message = null;
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password })
+    });
+    const json = await res.json().catch(() => null);
+    if (res.ok && json && json.success) {
+      // The session lives in an HttpOnly cookie set by the Worker --
+      // deliberately nothing is stored in JS or localStorage here, so
+      // there is no token for a future XSS to steal.
+      document.getElementById("loginPassword").value = "";
+      showToast(t("loginSuccess"), "success");
+      await refreshCloudAuthState();
+      showScreen("screen-home");
+      // Anything queued while signed out syncs now, with no data moved
+      // or lost in the meantime.
+      if (typeof flushSyncQueue === "function") flushSyncQueue();
+    } else if (res.status === 429) {
+      message = t("loginTooMany");
+    } else {
+      message = t("loginBadPassword");
+    }
+  } catch (netErr) {
+    message = t("loginNetworkError");
+  }
+
+  if (message) {
+    errEl.textContent = message;
+    errEl.style.display = "block";
+  }
+  btn.disabled = false;
+  btn.textContent = t("btnLogin");
+});
 
 document.getElementById("dataDiagnosticBtn").addEventListener("click", () => {
   document.getElementById("diagnosticSearchInput").value = "";
@@ -2469,6 +2586,12 @@ document.getElementById("savePhotoSettingsBtn").addEventListener("click", async 
 
 // ---------- Init ----------
 applyLanguage("ar");
+
+// Ask the Worker whether cloud auth is configured and whether this
+// device already has a valid session. Fire-and-forget: if it fails
+// (offline, no cloud layer), the app carries on exactly as before --
+// this must never gate startup.
+refreshCloudAuthState();
 
 // ---------- PWA: register service worker for offline support ----------
 if ("serviceWorker" in navigator) {

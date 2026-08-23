@@ -76,6 +76,9 @@
       </div>
       <input type="file" id="importBackupInput" accept="application/json" hidden>
       <button id="dataDiagnosticBtn" class="btn btn-text" data-i18n="btnDataDiagnostic">🔍 فحص البيانات المخزّنة</button>
+      <!-- Hidden unless the Worker reports that cloud auth is configured,
+           so nothing changes for a purely local/offline setup. -->
+      <button id="cloudAuthBtn" class="btn btn-text" style="display:none;"></button>
     </section>
 
     <!-- SCREEN: Data diagnostic — read-only, shows exactly what's really
@@ -210,6 +213,24 @@
       <p class="muted" data-i18n="unlinkedVisitsHint">هذي الزيارات لها اسم موقع لا يطابق أي مدرسة محفوظة حاليًا.</p>
       <div id="unlinkedVisitsList"></div>
       <button id="unlinkedVisitsBackBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
+    </section>
+
+    <!-- SCREEN: Cloud sign-in.
+         Only ever shown when the user explicitly opens it from Settings.
+         It gates CLOUD SYNC only -- never the app itself, which keeps
+         working entirely offline on IndexedDB whether signed in or not. -->
+    <section id="screen-login" class="screen">
+      <h2 data-i18n="loginHeading">تسجيل الدخول للمزامنة السحابية</h2>
+      <p class="muted" data-i18n="loginHint">التطبيق يعمل بالكامل بدون تسجيل دخول. تسجيل الدخول مطلوب فقط لمزامنة بياناتك مع النسخة الاحتياطية السحابية.</p>
+      <form id="loginForm">
+        <label class="field">
+          <span data-i18n="loginPasswordLabel">كلمة المرور</span>
+          <input type="password" id="loginPassword" autocomplete="current-password" required>
+        </label>
+        <p id="loginError" class="login-error" style="display:none;"></p>
+        <button type="submit" id="loginSubmitBtn" class="btn btn-primary btn-large" data-i18n="btnLogin">تسجيل الدخول</button>
+      </form>
+      <button id="loginBackBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
     </section>
 
     <!-- SCREEN: New Report -->
@@ -525,14 +546,14 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="storage.js?v=21"></script>
-  <script src="sync.js?v=21"></script>
-  <script src="media.js?v=21"></script>
-  <script src="photodoc.js?v=21"></script>
-  <script src="pdf.js?v=21"></script>
-  <script src="pptx.js?v=21"></script>
-  <script src="app.js?v=21"></script>
-  <script src="scenes.js?v=21"></script>
-  <script src="monthly.js?v=21"></script>
+  <script src="storage.js?v=22"></script>
+  <script src="sync.js?v=22"></script>
+  <script src="media.js?v=22"></script>
+  <script src="photodoc.js?v=22"></script>
+  <script src="pdf.js?v=22"></script>
+  <script src="pptx.js?v=22"></script>
+  <script src="app.js?v=22"></script>
+  <script src="scenes.js?v=22"></script>
+  <script src="monthly.js?v=22"></script>
 </body>
 </html>

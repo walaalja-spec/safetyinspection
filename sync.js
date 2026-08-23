@@ -8,10 +8,13 @@
 // saveCurrentObservation() in app.js, which calls enqueueEntitySync()
 // only *after* saveReport() has already resolved.
 //
-// Never embeds any secret: /api/* now accepts a same-origin request
-// (real Origin/Referer header, which every fetch() from this page sends
-// automatically) without needing the API_INTERNAL_KEY fallback that
-// exists only to lock out headerless direct access (see worker.js).
+// Never embeds any secret. Authentication travels as an HttpOnly session
+// cookie that the Worker sets at login: the browser attaches it to these
+// same-origin fetches automatically, and page JavaScript cannot read it.
+// That is why nothing here handles credentials at all -- and why a
+// 401 is treated as a transient failure (see SYNC_PERMANENT_STATUS
+// below), so signing out or letting a session lapse queues work for
+// later instead of ever discarding a locally-saved record.
 // ---------------------------------------------------------------------
 
 const SYNC_MAX_BACKOFF_MS = 60000;
@@ -334,8 +337,14 @@ function updateSyncIndicator() {
       el.style.display = "none";
       return;
     }
+    // A 401 means "signed out", not "broken" -- say so, so the user knows
+    // the actionable next step. Either way the data is already safe
+    // locally and nothing is discarded.
+    const needsSignIn = pending.some((it) => it.lastError === "unauthorized" || it.lastError === "http_401");
     const stuck = pending.some((it) => it.retryCount >= 5);
-    el.textContent = stuck
+    el.textContent = needsSignIn
+      ? (typeof t === "function" ? t("cloudSyncSignInNeeded") : "سجّلي الدخول لمزامنة بياناتك")
+      : stuck
       ? (typeof t === "function" ? t("cloudSyncNeedsAttention") : "تعذّرت مزامنة بعض البيانات — سيُعاد المحاولة")
       : (typeof t === "function" ? t("cloudSyncPending")(pending.length) : `جاري مزامنة ${pending.length} عنصر مع السحابة`);
     el.style.display = "flex";
