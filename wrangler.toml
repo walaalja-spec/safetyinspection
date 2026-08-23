@@ -3,5 +3,31 @@ main = "worker.js"
 compatibility_date = "2026-01-01"
 
 [assets]
-directory = "."
 binding = "ASSETS"
+directory = "."
+
+# ---------------------------------------------------------------------
+# Phase 2 — cloud data layer (D1 + R2), infrastructure only.
+#
+# These are PLACEHOLDER bindings for local development (`wrangler dev
+# --local` / `wrangler d1 execute --local`), which work with no real
+# Cloudflare account or credentials. Nothing in the deployed app uses
+# them yet — the frontend still runs entirely on IndexedDB.
+#
+# Before this is ever deployed for real:
+#   1. npx wrangler d1 create safety_inspection_d1
+#      -> replace database_id below with the real id it prints.
+#   2. npx wrangler r2 bucket create safety-inspection-photos
+#      -> bucket_name below must match exactly what you created.
+#   3. npx wrangler d1 execute safety_inspection_d1 --remote --file=migrations/0001_init.sql
+# None of these three steps have been run in this phase. See
+# PHASE2_MIGRATION_PLAN.md before ever running them against real data.
+# ---------------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "safety_inspection_d1"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "safety-inspection-photos"
