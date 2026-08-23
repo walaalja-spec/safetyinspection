@@ -211,7 +211,23 @@ async function processPhotoItem(item) {
 
   const confirmOutcome = await recordAttemptResult(item, confirmResult, confirmErrMessage);
   if (confirmOutcome.success) {
-    await updateSyncItem(item.id, { status: "synced", cloudId: confirmOutcome.data.id, syncedAt: Date.now(), lastError: null });
+    // The Blob is no longer needed once R2 has confirmed the real copy --
+    // keeping it in the queue record was the actual cause of "save feels
+    // slower over time": every getAllSyncItems() call (every enqueue's
+    // dedup scan, every dependency check) deserializes every entry's
+    // payload, including this Blob, via storage.js's Blob<->ArrayBuffer
+    // handling. Left unstripped, that cost grows without bound as more
+    // photos sync -- measured ~2ms per scan at 1 synced photo vs. ~130ms
+    // at 60 (real ~600KB photos), and every save enqueues at least one
+    // scan. Stripping it brings a synced photo entry down to the same
+    // tiny-JSON cost class as a school/visit/observation entry.
+    await updateSyncItem(item.id, {
+      status: "synced",
+      cloudId: confirmOutcome.data.id,
+      syncedAt: Date.now(),
+      lastError: null,
+      payload: { ...item.payload, blob: null }
+    });
   }
   return { done: confirmOutcome.done };
 }
@@ -254,6 +270,23 @@ async function enqueuePhotosForObservation(observationId, photos) {
   }
   updateSyncIndicator();
   scheduleSyncSoon();
+}
+
+// Defense in depth alongside the blob-stripping above: even a
+// blob-free "synced" entry is pure overhead once nothing can still
+// depend on it, and getAllSyncItems() keeps scanning it forever
+// otherwise. 24h comfortably outlives any real dependency chain (a
+// child only ever waits on a parent synced earlier in the same
+// session), so this never removes an entry something still needs.
+const SYNC_PRUNE_AGE_MS = 24 * 60 * 60 * 1000;
+async function pruneOldSyncedItems() {
+  const all = await getAllSyncItems();
+  const cutoff = Date.now() - SYNC_PRUNE_AGE_MS;
+  for (const item of all) {
+    if (item.status === "synced" && item.syncedAt && item.syncedAt < cutoff) {
+      await deleteSyncItem(item.id);
+    }
+  }
 }
 
 async function flushSyncQueue() {
@@ -315,5 +348,6 @@ if (typeof window !== "undefined") {
   window.addEventListener("DOMContentLoaded", () => {
     updateSyncIndicator();
     flushSyncQueue();
+    pruneOldSyncedItems().catch((err) => console.warn("Sync queue prune failed (non-critical):", err));
   });
 }
