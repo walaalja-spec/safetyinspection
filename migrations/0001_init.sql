@@ -11,8 +11,10 @@
 --   schools -> monthly_submissions -> photo_refs
 --
 -- Apply locally with:
---   npx wrangler d1 execute safety_inspection_d1 --local --file=migrations/0001_init.sql
--- (Never run with --remote in this phase — see PHASE2_MIGRATION_PLAN.md.)
+--   npx wrangler d1 execute school-inspection-db --local --file=migrations/0001_init.sql
+-- This has NOT been applied with --remote against the real database yet
+-- (school-inspection-db) — that requires explicit approval first. See
+-- PHASE2_MIGRATION_PLAN.md.
 -- ---------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS schools (
