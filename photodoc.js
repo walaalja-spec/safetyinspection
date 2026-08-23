@@ -92,8 +92,8 @@ function createDocumentedPhoto(sourceBlob, lines, isRtl) {
       // (stroke) drawn behind the white fill of each glyph.
       ctx.lineJoin = "round";
       ctx.miterLimit = 2;
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
-      ctx.lineWidth = Math.max(3, Math.round(fontSize * 0.22));
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.14));
       ctx.fillStyle = "#ffffff";
       ctx.direction = isRtl ? "rtl" : "ltr";
       ctx.textAlign = isRtl ? "right" : "left";
