@@ -182,23 +182,13 @@ function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000, lines = [
         const barHeight = lines.length * (fontSize + lineGap) + paddingY * 2 - lineGap;
         const barY = targetHeight - barHeight;
 
-        // Same soft gradient fade used for the in-app documented photos
-        // (photodoc.js) instead of a flat black bar, for a consistent
-        // look across PDF/app/PPTX exports.
-        const fadeHeight = Math.round(fontSize * 1.4);
-        const gradientTop = Math.max(0, barY - fadeHeight);
-        const gradient = ctx.createLinearGradient(0, gradientTop, 0, targetHeight);
-        gradient.addColorStop(0, "rgba(0,0,0,0)");
-        gradient.addColorStop(0.35, "rgba(0,0,0,0.3)");
-        gradient.addColorStop(1, "rgba(0,0,0,0.72)");
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, gradientTop, targetWidth, targetHeight - gradientTop);
-
-        ctx.shadowColor = "rgba(0,0,0,0.9)";
-        ctx.shadowBlur = Math.round(fontSize * 0.3);
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 1;
-
+        // No background fill at all — same fully-transparent, stroked-text
+        // approach used for the in-app documented photos (photodoc.js),
+        // for a consistent look across PDF/app/PPTX exports.
+        ctx.lineJoin = "round";
+        ctx.miterLimit = 2;
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.lineWidth = Math.max(3, Math.round(fontSize * 0.22));
         ctx.fillStyle = "#ffffff";
         ctx.direction = isRtl ? "rtl" : "ltr";
         ctx.textAlign = isRtl ? "right" : "left";
@@ -206,11 +196,11 @@ function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000, lines = [
         const paddingX = Math.round(targetWidth * 0.025);
         let ty = barY + paddingY + fontSize * 0.8;
         lines.forEach((line) => {
-          ctx.fillText(line, isRtl ? targetWidth - paddingX : paddingX, ty);
+          const tx = isRtl ? targetWidth - paddingX : paddingX;
+          ctx.strokeText(line, tx, ty);
+          ctx.fillText(line, tx, ty);
           ty += fontSize + lineGap;
         });
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
       }
 
       canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/jpeg", 0.88);
