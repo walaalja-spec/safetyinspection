@@ -324,6 +324,19 @@ function isAuthorizedApiRequest(request, env) {
 // can therefore never lock the user out of their own data.
 // ---------------------------------------------------------------------
 
+// Secrets are read through this rather than off `env` directly.
+// Pasting a value into the Cloudflare dashboard very easily carries a
+// trailing newline or space, and a single invisible character silently
+// breaks everything: an extra byte on the SALT derives a completely
+// different hash, and an extra byte on the HASH fails the length check
+// in timingSafeEqual. Both surface only as "wrong password", which is
+// impossible to diagnose from the outside -- so trim on read instead of
+// making the operator hunt for whitespace they cannot see.
+function readSecret(env, name) {
+  const value = env[name];
+  return typeof value === "string" ? value.trim() : value;
+}
+
 const SESSION_COOKIE = "wj_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d — field use spans days offline
 const PBKDF2_ITERATIONS = 210000; // OWASP-recommended floor for PBKDF2-SHA256
@@ -371,19 +384,19 @@ async function hmacHex(message, secret) {
 async function issueSessionToken(env) {
   const payload = JSON.stringify({ sub: "owner", iat: Date.now(), exp: Date.now() + SESSION_TTL_MS });
   const body = base64UrlEncode(payload);
-  return `${body}.${await hmacHex(body, env.SESSION_SECRET)}`;
+  return `${body}.${await hmacHex(body, readSecret(env, "SESSION_SECRET"))}`;
 }
 
 // Returns the payload when the signature verifies AND the token is
 // unexpired; null otherwise. Signature is checked before expiry so a
 // forged token is rejected on its merits, not its clock.
 async function verifySessionToken(token, env) {
-  if (!token || !env.SESSION_SECRET) return null;
+  if (!token || !readSecret(env, "SESSION_SECRET")) return null;
   const dot = token.lastIndexOf(".");
   if (dot < 1) return null;
   const body = token.slice(0, dot);
   const signature = token.slice(dot + 1);
-  if (!timingSafeEqual(signature, await hmacHex(body, env.SESSION_SECRET))) return null;
+  if (!timingSafeEqual(signature, await hmacHex(body, readSecret(env, "SESSION_SECRET")))) return null;
   let payload;
   try {
     payload = JSON.parse(base64UrlDecode(body));
@@ -457,12 +470,36 @@ async function recordLoginAttempt(env, ip) {
 async function handleAuth(request, env, action) {
   if (action === "session" && request.method === "GET") {
     const session = await verifySessionToken(readCookie(request, SESSION_COOKIE), env);
+    const hash = readSecret(env, "AUTH_PASSWORD_HASH");
+    const salt = readSecret(env, "AUTH_PASSWORD_SALT");
+    const sessionSecret = readSecret(env, "SESSION_SECRET");
+
+    // `setup` reports only the SHAPE of each secret, never its value or
+    // any part of one. A wrong password is otherwise indistinguishable
+    // from a truncated or mis-pasted secret -- both just say "wrong
+    // password" -- and secrets cannot be read back from the Cloudflare
+    // dashboard once saved, so without this there is no way to tell the
+    // two apart. Knowing that the hash is 64 hex characters reveals
+    // nothing exploitable: that is simply the published output size of
+    // PBKDF2-SHA256, which the algorithm choice already implies.
+    const setup = {
+      saltPresent: !!salt,
+      hashPresent: !!hash,
+      sessionSecretPresent: !!sessionSecret,
+      // A correct hash is exactly 64 lowercase hex chars. Anything else
+      // means it was truncated, uppercased, or partially pasted.
+      hashLooksValid: typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash),
+      hashLength: typeof hash === "string" ? hash.length : 0,
+      saltLength: typeof salt === "string" ? salt.length : 0
+    };
+
     // Also reports whether auth is even configured, so the frontend can
     // stay in local-only mode instead of showing an unusable login form.
     return apiOk({
       authenticated: !!session,
-      configured: !!(env.AUTH_PASSWORD_HASH && env.AUTH_PASSWORD_SALT && env.SESSION_SECRET),
-      expiresAt: session ? session.exp : null
+      configured: !!(hash && salt && sessionSecret),
+      expiresAt: session ? session.exp : null,
+      setup
     });
   }
 
@@ -474,7 +511,7 @@ async function handleAuth(request, env, action) {
   }
 
   if (action === "login" && request.method === "POST") {
-    if (!env.AUTH_PASSWORD_HASH || !env.AUTH_PASSWORD_SALT || !env.SESSION_SECRET) {
+    if (!readSecret(env, "AUTH_PASSWORD_HASH") || !readSecret(env, "AUTH_PASSWORD_SALT") || !readSecret(env, "SESSION_SECRET")) {
       return apiErr("auth_not_configured", 503);
     }
     const ip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -487,8 +524,8 @@ async function handleAuth(request, env, action) {
       return apiErr("invalid_credentials", 401);
     }
 
-    const candidate = await pbkdf2Hex(body.password, env.AUTH_PASSWORD_SALT);
-    if (!timingSafeEqual(candidate, env.AUTH_PASSWORD_HASH)) {
+    const candidate = await pbkdf2Hex(body.password, readSecret(env, "AUTH_PASSWORD_SALT"));
+    if (!timingSafeEqual(candidate, readSecret(env, "AUTH_PASSWORD_HASH"))) {
       await recordLoginAttempt(env, ip);
       // Deliberately identical to the empty-password error: never reveal
       // whether a password was close, or that the account exists.
