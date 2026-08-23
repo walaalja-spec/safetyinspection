@@ -131,6 +131,14 @@ async function blobsToBuffersForWrite(value) {
 }
 
 function buffersToBlobsAfterRead(value) {
+  // A record saved *before* this fix shipped still has real Blob objects
+  // in it (the old storage format) -- must be returned as-is here. Without
+  // this check they fall into the generic object-walk below, and since
+  // Object.keys(aBlob) is empty (size/type are prototype getters, not own
+  // enumerable properties), that walk would silently replace the photo
+  // with `{}`, destroying it. This must be checked first, before the
+  // generic object branch.
+  if (value instanceof Blob) return value;
   if (value && typeof value === "object" && value.__buf === true && value.buffer) {
     return new Blob([value.buffer], { type: value.type });
   }
