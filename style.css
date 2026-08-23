@@ -451,6 +451,13 @@ html[dir="ltr"] select { background-position: right 14px center; }
   box-shadow: var(--shadow-2); z-index: 45; max-width: 90%; text-align: center;
 }
 
+/* Stacks below #pendingSaveIndicator (local IndexedDB retry) when both
+   happen to be visible at once -- cloud sync is a secondary, separate
+   concern from the local save this badge never gates. */
+.cloud-sync-indicator {
+  top: calc(max(12px, env(safe-area-inset-top)) + 44px);
+}
+
 /* ---------- AI review ---------- */
 .ai-visual-note {
   background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: var(--r-lg);

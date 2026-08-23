@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------
 
 const DB_NAME = "safety_inspection_db";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_NAME = "reports";
 const MONTHLY_TEMPLATE_STORE = "monthly_templates";
 const MONTHLY_SCHOOLS_STORE = "monthly_schools";
@@ -18,6 +18,17 @@ const MONTHLY_SUBMISSIONS_STORE = "monthly_submissions";
 // but otherwise unrelated data.
 const SCENE_TEMPLATE_STORE = "scene_templates";
 const SCENE_TRACKING_STORE = "scene_tracking";
+// Cloud-sync queue (see sync.js). IndexedDB remains the only store the
+// rest of the app reads/writes for real data — this store only tracks
+// which already-saved records still need to reach D1/R2, and its own
+// state (pending/failed/retryCount/lastError). Deliberately NOT part of
+// BACKUP_STORE_MAP/exportBackupBlob(): the underlying data it points at
+// (reports, monthly_submissions, ...) is already backed up in full, and
+// after a restore the sync engine just re-derives what still needs
+// syncing by scanning those stores again -- carrying stale queue entries
+// across a restore (possibly pointing at ids that no longer exist) would
+// be a worse failure mode than simply re-scanning.
+const SYNC_QUEUE_STORE = "sync_queue";
 
 // Single shared connection, opened once and reused — avoids the
 // overhead/edge-cases of re-opening a fresh IndexedDB connection on
@@ -30,6 +41,11 @@ function openDB() {
 
   dbConnectionPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+    // If a blocked open() never settles (see onblocked below), this fires
+    // instead of leaving every caller (saveReport included) awaiting a
+    // promise that neither resolves nor rejects, forever.
+    let blockedTimeout = null;
+    let settled = false;
 
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
@@ -51,17 +67,36 @@ function openDB() {
       if (!db.objectStoreNames.contains(SCENE_TRACKING_STORE)) {
         db.createObjectStore(SCENE_TRACKING_STORE, { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains(SYNC_QUEUE_STORE)) {
+        db.createObjectStore(SYNC_QUEUE_STORE, { keyPath: "id" });
+      }
     };
 
     req.onblocked = () => {
       // Another tab/old connection is holding the DB open during an
-      // upgrade. Don't hang forever — surface it so the retry logic
-      // in saveReportWithRetry can react instead of silently stalling.
+      // upgrade (classic PWA case: a stale background tab still has the
+      // old version loaded). This alone used to hang forever — neither
+      // onsuccess nor onerror ever fires until the other tab closes.
       console.warn("IndexedDB open blocked by another connection/tab.");
+      blockedTimeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        dbConnectionPromise = null;
+        reject(new Error("indexeddb_blocked_timeout"));
+      }, 5000);
     };
 
     req.onsuccess = () => {
+      clearTimeout(blockedTimeout);
       const db = req.result;
+      if (settled) {
+        // The blocked-timeout already rejected this attempt and a fresh
+        // open() may already be in flight — this connection is unwanted
+        // now, so just close it instead of leaking it or resolving twice.
+        db.close();
+        return;
+      }
+      settled = true;
       // If the connection drops unexpectedly (browser reclaiming
       // resources, etc.), drop the cached promise so the next call
       // opens a fresh connection instead of reusing a dead one.
@@ -71,6 +106,9 @@ function openDB() {
     };
 
     req.onerror = () => {
+      clearTimeout(blockedTimeout);
+      if (settled) return;
+      settled = true;
       dbConnectionPromise = null;
       reject(req.error);
     };
@@ -862,4 +900,71 @@ function sceneCompletionStats(scenes, trackingRecord) {
   const completed = received + sent;
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
   return { total, received, sent, notDone, completed, percent };
+}
+
+// ---------------------------------------------------------------------
+// Cloud-sync queue (see sync.js for the engine that processes this).
+//
+// This never holds the only copy of anything — every entry's `payload`
+// mirrors data that is already safely in one of the stores above. Losing
+// the whole queue (a failed upgrade, manual IndexedDB wipe, whatever)
+// never loses user data, only the bookkeeping of what's already synced;
+// sync.js can always re-derive that by scanning the real stores again.
+// ---------------------------------------------------------------------
+
+function genSyncId() {
+  return "sync_" + Date.now() + "_" + Math.floor(Math.random() * 1e9).toString(36);
+}
+
+// entityType: "school" | "visit" | "observation" | "monthly_submission" | "photo"
+// op: "create" | "update" | "delete"
+// localRefId: the id of the real local record this entry is about (for
+// lookups/dedup) -- NOT this queue entry's own id.
+// payload: exact JSON body sync.js will POST/PUT to the matching /api/*
+// endpoint.
+async function enqueueSyncItem({ entityType, op, localRefId, payload }) {
+  const now = Date.now();
+  const item = {
+    id: genSyncId(),
+    entityType,
+    op,
+    localRefId,
+    payload,
+    cloudId: null,
+    status: "pending", // pending | syncing | failed | synced
+    retryCount: 0,
+    lastError: null,
+    createdAt: now,
+    updatedAt: now,
+    syncedAt: null
+  };
+  await storePut(SYNC_QUEUE_STORE, item);
+  return item;
+}
+
+// Oldest first, so entities sync in the order the user created them
+// (schools before the visits that reference them, etc., when the caller
+// enqueues in that order to begin with).
+async function getPendingSyncItems() {
+  const all = await storeGetAll(SYNC_QUEUE_STORE);
+  return all
+    .filter((item) => item.status === "pending" || item.status === "failed")
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+async function getAllSyncItems() {
+  const all = await storeGetAll(SYNC_QUEUE_STORE);
+  return all.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+async function updateSyncItem(id, patch) {
+  const existing = await storeGet(SYNC_QUEUE_STORE, id);
+  if (!existing) return null;
+  const updated = { ...existing, ...patch, updatedAt: Date.now() };
+  await storePut(SYNC_QUEUE_STORE, updated);
+  return updated;
+}
+
+async function deleteSyncItem(id) {
+  await storeDelete(SYNC_QUEUE_STORE, id);
 }

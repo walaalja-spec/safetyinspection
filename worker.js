@@ -349,13 +349,18 @@ async function handleApi(request, env, url) {
   }
   // Cloudflare's Git integration auto-deploys a public preview URL for
   // every push (observed directly: a preview build went live for this
-  // branch without anyone running `wrangler deploy`). isAllowedOrigin
-  // alone doesn't stop a direct request with no Origin/Referer header, so
-  // without this gate that preview URL's /api/* — including R2 photo
-  // upload — is reachable by anyone who has the link. Fails closed: no
-  // API_INTERNAL_KEY secret configured means every request is rejected,
-  // not allowed through.
-  if (!isAuthorizedApiRequest(request, env)) {
+  // branch without anyone running `wrangler deploy`). isAllowedOrigin()
+  // alone doesn't stop a direct request with no Origin/Referer header at
+  // all — that's exactly how curl could reach R2 photo upload on that
+  // preview URL. A real page load of this app always sends Origin and/or
+  // Referer on a same-origin fetch, even for POST/PUT/DELETE, so only the
+  // headerless case needs a second check — which lets the frontend call
+  // /api/* without ever embedding API_INTERNAL_KEY in its own JS (a
+  // secret shipped to the browser stops being a secret). Fails closed:
+  // no API_INTERNAL_KEY configured means every headerless request is
+  // rejected, not allowed through.
+  const hasOriginSignal = !!(request.headers.get("Origin") || request.headers.get("Referer"));
+  if (!hasOriginSignal && !isAuthorizedApiRequest(request, env)) {
     return apiErr("unauthorized", 401);
   }
   if (!env.DB || !env.BUCKET) {
@@ -404,8 +409,17 @@ async function handleSchools(request, env, method, id) {
     let body;
     try { body = await request.json(); } catch (e) { return apiErr("malformed_json", 400); }
     if (!isNonEmptyString(body.name)) return apiErr("invalid_name", 400);
+    // Client-supplied id makes creation idempotent: a sync engine can
+    // generate the id up front and safely retry the exact same request
+    // after a timeout/dropped response without risking a duplicate row.
+    // Omitting id keeps the old server-generated-id behavior.
+    if (body.id !== undefined) {
+      if (!isSafeId(body.id)) return apiErr("invalid_id", 400);
+      const existing = await env.DB.prepare("SELECT * FROM schools WHERE id = ?").bind(body.id).first();
+      if (existing) return apiOk(existing, 200);
+    }
     const now = Date.now();
-    const school = { id: genId("school"), name: body.name.trim(), created_at: now, updated_at: now };
+    const school = { id: body.id || genId("school"), name: body.name.trim(), created_at: now, updated_at: now };
     await env.DB.prepare(
       "INSERT INTO schools (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)"
     ).bind(school.id, school.name, school.created_at, school.updated_at).run();
@@ -467,9 +481,16 @@ async function handleVisits(request, env, method, id) {
       if (!school) return apiErr("school_not_found", 404);
       schoolId = body.schoolId;
     }
+    // See handleSchools' POST for why: a client-supplied id makes a
+    // retried creation request idempotent instead of duplicating the visit.
+    if (body.id !== undefined) {
+      if (!isSafeId(body.id)) return apiErr("invalid_id", 400);
+      const existing = await env.DB.prepare("SELECT * FROM visits WHERE id = ?").bind(body.id).first();
+      if (existing) return apiOk(existing, 200);
+    }
     const now = Date.now();
     const visit = {
-      id: genId("visit"),
+      id: body.id || genId("visit"),
       school_id: schoolId,
       title: body.title.trim(),
       location: body.location.trim(),
@@ -549,9 +570,16 @@ async function handleObservations(request, env, method, id) {
     if (!isNonEmptyString(body.text)) return apiErr("missing_text", 400);
     const visit = await env.DB.prepare("SELECT id FROM visits WHERE id = ?").bind(body.visitId).first();
     if (!visit) return apiErr("visit_not_found", 404);
+    // See handleSchools' POST for why: a client-supplied id makes a
+    // retried creation request idempotent instead of duplicating the note.
+    if (body.id !== undefined) {
+      if (!isSafeId(body.id)) return apiErr("invalid_id", 400);
+      const existing = await env.DB.prepare("SELECT * FROM observations WHERE id = ?").bind(body.id).first();
+      if (existing) return apiOk(existing, 200);
+    }
     const now = Date.now();
     const obs = {
-      id: genId("obs"),
+      id: body.id || genId("obs"),
       visit_id: body.visitId,
       text: body.text.trim(),
       spot_location: body.spotLocation || null,
