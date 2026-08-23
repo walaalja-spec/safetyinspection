@@ -458,6 +458,13 @@ html[dir="ltr"] select { background-position: right 14px center; }
   top: calc(max(12px, env(safe-area-inset-top)) + 44px);
 }
 
+/* ---------- Cloud sign-in ---------- */
+.login-error {
+  background: #fdecec; color: #a12a2a; border: 1px solid #f3c9c9;
+  border-radius: var(--r-md); padding: 10px 14px;
+  font-size: var(--fs-sm); font-weight: 700; margin: 12px 0;
+}
+
 /* ---------- AI review ---------- */
 .ai-visual-note {
   background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: var(--r-lg);

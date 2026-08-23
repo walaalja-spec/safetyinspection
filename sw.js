@@ -10,7 +10,7 @@
 // cached versions get cleared out automatically on activate.
 // ---------------------------------------------------------------------
 
-const CACHE_NAME = "walaa-safety-v3";
+const CACHE_NAME = "walaa-safety-v4";
 
 const CORE_ASSETS = [
   "/",
@@ -54,6 +54,12 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
   if (url.pathname === "/analyze") return; // AI calls always go live, never cached
+  // Never cache the cloud API. These responses carry inspection data and
+  // photo bytes, and caching them would (a) persist that data outside
+  // IndexedDB in the Cache API with no expiry, and (b) risk serving a
+  // stale or cross-session response. IndexedDB is the offline story for
+  // this data -- the HTTP cache has no role to play here.
+  if (url.pathname.startsWith("/api/")) return;
 
   event.respondWith(
     fetch(req)

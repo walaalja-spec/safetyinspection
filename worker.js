@@ -48,14 +48,17 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    // Security headers are applied to EVERY response, not just static
+    // assets — API responses (including raw photo bytes from R2) need
+    // nosniff just as much as HTML does.
     if (url.pathname === "/analyze" && request.method === "POST") {
-      return handleAnalyze(request, env, url);
+      return withSecurityHeaders(await handleAnalyze(request, env, url));
     }
 
-    // Phase 2 cloud data layer (D1 + R2) — infrastructure only, not yet
-    // wired to the frontend. See PHASE2_MIGRATION_PLAN.md.
+    // Phase 2 cloud data layer (D1 + R2). Every route below /api/ except
+    // /api/auth/* requires an authenticated session — see handleApi().
     if (url.pathname.startsWith("/api/")) {
-      return handleApi(request, env, url);
+      return withSecurityHeaders(await handleApi(request, env, url));
     }
 
     // Everything else (index.html, app.js, style.css, ...) is served
@@ -109,9 +112,16 @@ const MAX_TEXT_CHARS = 8000;
 const MAX_IMAGE_BASE64_CHARS = 8_000_000; // ~6MB decoded
 
 async function handleAnalyze(request, env, url) {
+  // CSRF defense-in-depth only — see handleApi().
   if (!isAllowedOrigin(request, url.origin)) {
     return jsonResponse({ error: "forbidden" }, 403);
   }
+  // This endpoint spends real money on every call (OpenAI, billed to the
+  // project's key) and previously accepted a ~6MB image from anyone who
+  // set one header. It now requires the same verified session as the
+  // rest of the API.
+  const denied = await requireAuth(request, env);
+  if (denied) return jsonResponse({ error: "unauthorized" }, 401);
 
   let body;
   try {
@@ -274,21 +284,225 @@ const PHOTO_TYPES = new Set(["original", "before", "after", "monthly", "audio"])
 const OWNER_TYPES = new Set(["observation", "monthly_submission"]);
 const MAX_PHOTO_BYTES = 15_000_000;
 
-// Not the eventual real auth system for /api/* — just a stopgap so the
-// D1/R2-backed endpoints aren't wide open on Cloudflare's auto-deployed
-// preview URLs before the frontend (and a real auth design) exists. Set
-// via `wrangler secret put API_INTERNAL_KEY` (per environment) — never
-// hardcode a value here or in wrangler.toml.
+// A machine-to-machine credential ONLY (migration tooling, ops scripts).
+// It is deliberately never sent by the frontend: a secret shipped to a
+// browser is visible to anyone with DevTools, so it would stop being a
+// secret the moment the app used it. Browsers authenticate with the
+// session cookie below instead. Set via
+// `wrangler secret put API_INTERNAL_KEY` — never hardcode it here or in
+// wrangler.toml.
 function isAuthorizedApiRequest(request, env) {
   const expected = env.API_INTERNAL_KEY;
   if (!expected) return false;
   const provided = request.headers.get("X-Api-Key");
-  if (!provided || provided.length !== expected.length) return false;
+  return timingSafeEqual(provided, expected);
+}
+
+// ---------------------------------------------------------------------
+// Authentication — single-operator session, HMAC-signed, HttpOnly cookie.
+//
+// Design notes:
+//  * `Origin`/`Referer` are NEVER treated as authentication. They are
+//    client-controlled and trivially spoofed by any non-browser client;
+//    they remain only as CSRF defense-in-depth alongside SameSite=Strict.
+//  * The session token is stateless (HMAC over {exp, iat, sub}), so no
+//    D1 read is needed per request. Global revocation = rotate
+//    SESSION_SECRET, which invalidates every existing session at once.
+//  * Nothing secret ever reaches the browser: the cookie is HttpOnly, so
+//    page JavaScript cannot read it, and the password itself is never
+//    stored client-side.
+//
+// Required secrets (set per environment, including preview):
+//   wrangler secret put AUTH_PASSWORD_HASH   # PBKDF2-SHA256, hex
+//   wrangler secret put AUTH_PASSWORD_SALT   # random, hex
+//   wrangler secret put SESSION_SECRET       # random 32+ bytes
+//
+// IMPORTANT DEGRADATION RULE: if these secrets are absent, /api/* and
+// /analyze refuse access (fail closed) — but the app itself keeps
+// working entirely on IndexedDB, exactly as it did before any cloud
+// layer existed, with sync queueing harmlessly. Missing configuration
+// can therefore never lock the user out of their own data.
+// ---------------------------------------------------------------------
+
+const SESSION_COOKIE = "wj_session";
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d — field use spans days offline
+const PBKDF2_ITERATIONS = 210000; // OWASP-recommended floor for PBKDF2-SHA256
+
+// Length-independent comparison: returns false for null/length mismatch
+// without leaking where the difference is via timing.
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.length !== b.length) return false;
   let diff = 0;
-  for (let i = 0; i < expected.length; i++) {
-    diff |= expected.charCodeAt(i) ^ provided.charCodeAt(i);
-  }
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+function bytesToHex(buf) {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function base64UrlEncode(str) {
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlDecode(str) {
+  const padded = str.replace(/-/g, "+").replace(/_/g, "/");
+  return atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+}
+
+async function pbkdf2Hex(password, saltHex) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: enc.encode(saltHex), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    keyMaterial,
+    256
+  );
+  return bytesToHex(bits);
+}
+
+async function hmacHex(message, secret) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return bytesToHex(await crypto.subtle.sign("HMAC", key, enc.encode(message)));
+}
+
+async function issueSessionToken(env) {
+  const payload = JSON.stringify({ sub: "owner", iat: Date.now(), exp: Date.now() + SESSION_TTL_MS });
+  const body = base64UrlEncode(payload);
+  return `${body}.${await hmacHex(body, env.SESSION_SECRET)}`;
+}
+
+// Returns the payload when the signature verifies AND the token is
+// unexpired; null otherwise. Signature is checked before expiry so a
+// forged token is rejected on its merits, not its clock.
+async function verifySessionToken(token, env) {
+  if (!token || !env.SESSION_SECRET) return null;
+  const dot = token.lastIndexOf(".");
+  if (dot < 1) return null;
+  const body = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
+  if (!timingSafeEqual(signature, await hmacHex(body, env.SESSION_SECRET))) return null;
+  let payload;
+  try {
+    payload = JSON.parse(base64UrlDecode(body));
+  } catch (e) {
+    return null;
+  }
+  if (typeof payload.exp !== "number" || Date.now() >= payload.exp) return null;
+  return payload;
+}
+
+function readCookie(request, name) {
+  const header = request.headers.get("Cookie");
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+  }
+  return null;
+}
+
+function sessionCookieHeader(token, maxAgeSeconds) {
+  // HttpOnly  -> unreadable by page JS, so XSS cannot exfiltrate it.
+  // Secure    -> never sent over plaintext.
+  // SameSite=Strict -> the browser won't attach it to cross-site
+  //              requests at all, which is the CSRF defense.
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}`;
+}
+
+// The single gate every protected route goes through. Accepts either a
+// valid browser session cookie or the machine credential — both are
+// verified server-side against a real secret. Returns null when
+// authenticated, or the 401 Response to return when not.
+async function requireAuth(request, env) {
+  const session = await verifySessionToken(readCookie(request, SESSION_COOKIE), env);
+  if (session) return null;
+  if (isAuthorizedApiRequest(request, env)) return null;
+  return apiErr("unauthorized", 401);
+}
+
+// Brute-force protection for the one password that exists. Backed by D1
+// so it survives isolate recycling (an in-memory counter would reset
+// constantly and provide no real protection).
+const LOGIN_MAX_ATTEMPTS = 8;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+async function loginRateLimited(env, ip) {
+  try {
+    const since = Date.now() - LOGIN_WINDOW_MS;
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM auth_login_attempts WHERE ip = ? AND attempted_at > ?"
+    ).bind(ip, since).first();
+    return !!row && row.n >= LOGIN_MAX_ATTEMPTS;
+  } catch (e) {
+    // Table missing (migration 0002 not applied yet) must not make login
+    // impossible — log and allow, rather than bricking access.
+    console.error("Login rate-limit check unavailable:", e);
+    return false;
+  }
+}
+
+async function recordLoginAttempt(env, ip) {
+  try {
+    await env.DB.prepare("INSERT INTO auth_login_attempts (ip, attempted_at) VALUES (?, ?)").bind(ip, Date.now()).run();
+    await env.DB.prepare("DELETE FROM auth_login_attempts WHERE attempted_at < ?").bind(Date.now() - LOGIN_WINDOW_MS).run();
+  } catch (e) {
+    console.error("Could not record login attempt:", e);
+  }
+}
+
+async function handleAuth(request, env, action) {
+  if (action === "session" && request.method === "GET") {
+    const session = await verifySessionToken(readCookie(request, SESSION_COOKIE), env);
+    // Also reports whether auth is even configured, so the frontend can
+    // stay in local-only mode instead of showing an unusable login form.
+    return apiOk({
+      authenticated: !!session,
+      configured: !!(env.AUTH_PASSWORD_HASH && env.AUTH_PASSWORD_SALT && env.SESSION_SECRET),
+      expiresAt: session ? session.exp : null
+    });
+  }
+
+  if (action === "logout" && request.method === "POST") {
+    return new Response(JSON.stringify({ success: true, data: { loggedOut: true } }), {
+      status: 200,
+      headers: { ...JSON_HEADERS, "Set-Cookie": sessionCookieHeader("", 0) }
+    });
+  }
+
+  if (action === "login" && request.method === "POST") {
+    if (!env.AUTH_PASSWORD_HASH || !env.AUTH_PASSWORD_SALT || !env.SESSION_SECRET) {
+      return apiErr("auth_not_configured", 503);
+    }
+    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+    if (await loginRateLimited(env, ip)) return apiErr("too_many_attempts", 429);
+
+    let body;
+    try { body = await request.json(); } catch (e) { return apiErr("malformed_json", 400); }
+    if (!isNonEmptyString(body.password)) {
+      await recordLoginAttempt(env, ip);
+      return apiErr("invalid_credentials", 401);
+    }
+
+    const candidate = await pbkdf2Hex(body.password, env.AUTH_PASSWORD_SALT);
+    if (!timingSafeEqual(candidate, env.AUTH_PASSWORD_HASH)) {
+      await recordLoginAttempt(env, ip);
+      // Deliberately identical to the empty-password error: never reveal
+      // whether a password was close, or that the account exists.
+      return apiErr("invalid_credentials", 401);
+    }
+
+    const token = await issueSessionToken(env);
+    return new Response(JSON.stringify({ success: true, data: { authenticated: true } }), {
+      status: 200,
+      headers: { ...JSON_HEADERS, "Set-Cookie": sessionCookieHeader(token, Math.floor(SESSION_TTL_MS / 1000)) }
+    });
+  }
+
+  return apiErr("not_found", 404);
 }
 
 function extFromContentType(ct) {
@@ -344,32 +558,38 @@ async function deletePhotoRefsForOwner(env, ownerType, ownerId) {
 }
 
 async function handleApi(request, env, url) {
+  // Kept as CSRF defense-in-depth ONLY. This is not authentication: a
+  // non-browser client sets Origin to anything it likes, which is
+  // exactly how the previous version of this gate was bypassable. Real
+  // identity is established by requireAuth() below.
   if (!isAllowedOrigin(request, url.origin)) {
     return apiErr("forbidden", 403);
-  }
-  // Cloudflare's Git integration auto-deploys a public preview URL for
-  // every push (observed directly: a preview build went live for this
-  // branch without anyone running `wrangler deploy`). isAllowedOrigin()
-  // alone doesn't stop a direct request with no Origin/Referer header at
-  // all — that's exactly how curl could reach R2 photo upload on that
-  // preview URL. A real page load of this app always sends Origin and/or
-  // Referer on a same-origin fetch, even for POST/PUT/DELETE, so only the
-  // headerless case needs a second check — which lets the frontend call
-  // /api/* without ever embedding API_INTERNAL_KEY in its own JS (a
-  // secret shipped to the browser stops being a secret). Fails closed:
-  // no API_INTERNAL_KEY configured means every headerless request is
-  // rejected, not allowed through.
-  const hasOriginSignal = !!(request.headers.get("Origin") || request.headers.get("Referer"));
-  if (!hasOriginSignal && !isAuthorizedApiRequest(request, env)) {
-    return apiErr("unauthorized", 401);
-  }
-  if (!env.DB || !env.BUCKET) {
-    return apiErr("cloud_storage_not_configured", 500);
   }
 
   const parts = url.pathname.split("/").filter(Boolean); // ["api", "schools", ":id", ...]
   const resource = parts[1];
   const id = parts[2];
+
+  // The auth endpoints themselves must stay reachable without a session
+  // — otherwise logging in would require already being logged in. They
+  // do their own credential checking and rate limiting.
+  if (resource === "auth") {
+    try {
+      return await handleAuth(request, env, id);
+    } catch (e) {
+      console.error("Auth error:", e);
+      return apiErr("internal_error", 500);
+    }
+  }
+
+  // Every other /api/* route requires a verified session cookie or the
+  // machine credential. Nothing below this line runs unauthenticated.
+  const denied = await requireAuth(request, env);
+  if (denied) return denied;
+
+  if (!env.DB || !env.BUCKET) {
+    return apiErr("cloud_storage_not_configured", 500);
+  }
 
   try {
     switch (resource) {
@@ -792,6 +1012,14 @@ async function handlePhotoUpload(request, env, url) {
   const knownExt = extFromContentType(contentType);
   if (knownExt === "bin") return apiErr("unsupported_content_type", 415);
 
+  // Verify the owning record actually exists BEFORE writing anything to
+  // R2. Previously this check lived only in /confirm, so an unauthorized
+  // (or simply buggy) caller could fill the bucket with objects that no
+  // record ever referenced and nothing would ever clean up.
+  const ownerTable = ownerType === "observation" ? "observations" : "monthly_submissions";
+  const ownerRow = await env.DB.prepare(`SELECT id FROM ${ownerTable} WHERE id = ?`).bind(ownerId).first();
+  if (!ownerRow) return apiErr("owner_not_found", 404);
+
   const bytes = await request.arrayBuffer();
   if (bytes.byteLength === 0) return apiErr("empty_body", 400);
   if (bytes.byteLength > MAX_PHOTO_BYTES) return apiErr("payload_too_large", 413);
@@ -803,7 +1031,29 @@ async function handlePhotoUpload(request, env, url) {
   // instead of creating a second orphaned object under a fresh random id.
   const photoId = clientPhotoId || genId("photo");
   const r2Key = buildPhotoKey({ ownerType, ownerId, photoType, photoId, ext: knownExt, schoolId, monthKey, slotId });
+
   const checksum = await sha256Hex(bytes);
+
+  // Every path segment of r2Key is caller-supplied, so a caller reusing
+  // ids would otherwise silently overwrite an already-stored object.
+  // Inspection photos are evidence: once an upload is recorded in
+  // photo_refs, that object is immutable.
+  //
+  // The checksum comparison is what makes this both safe AND
+  // retry-friendly. A genuine retry (identical bytes, same id) matches
+  // the recorded checksum and proceeds as an idempotent no-op. Anything
+  // that would CHANGE the stored bytes is rejected -- including the
+  // same-id case, which is not merely a security concern: /confirm
+  // returns the pre-existing row, so a changed object would leave D1
+  // reporting the old size and checksum while R2 served different
+  // content. Verified in testing: without this, D1 said size=20 while
+  // R2 returned 26 different bytes.
+  const alreadyRecorded = await env.DB.prepare(
+    "SELECT id, checksum FROM photo_refs WHERE r2_key = ?"
+  ).bind(r2Key).first();
+  if (alreadyRecorded && (alreadyRecorded.id !== photoId || alreadyRecorded.checksum !== checksum)) {
+    return apiErr("photo_key_conflict", 409);
+  }
 
   let putResult;
   try {
