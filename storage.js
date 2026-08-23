@@ -101,6 +101,48 @@ function generateId() {
   return "r_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
 }
 
+// ---------------------------------------------------------------------
+// WebKit (Safari, and every iOS browser under it) has a long-documented
+// bug where Blob values stored directly inside IndexedDB can come back
+// corrupted/unreadable after the browser is closed and reopened — the
+// record itself is fine (text fields load correctly), but the photo/
+// audio data doesn't decode, which is exactly the "notes are there, but
+// photos show a broken-image icon" symptom. ArrayBuffers don't hit this
+// bug, so every Blob anywhere in a record (photos, audio — nested any
+// number of levels deep) is converted to a small marker holding its raw
+// bytes right before every write, and rehydrated back into a real Blob
+// right after every read. This is invisible to every other caller in the
+// app: they only ever see real Blob objects, exactly as before.
+async function blobsToBuffersForWrite(value) {
+  if (value instanceof Blob) {
+    return { __buf: true, type: value.type, buffer: await value.arrayBuffer() };
+  }
+  if (Array.isArray(value)) {
+    const out = [];
+    for (const item of value) out.push(await blobsToBuffersForWrite(item));
+    return out;
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = await blobsToBuffersForWrite(value[key]);
+    return out;
+  }
+  return value;
+}
+
+function buffersToBlobsAfterRead(value) {
+  if (value && typeof value === "object" && value.__buf === true && value.buffer) {
+    return new Blob([value.buffer], { type: value.type });
+  }
+  if (Array.isArray(value)) return value.map(buffersToBlobsAfterRead);
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = buffersToBlobsAfterRead(value[key]);
+    return out;
+  }
+  return value;
+}
+
 // Normalizes an observation's photos to a consistent array of
 // { blob, takenAt }, regardless of which older/newer shape the data
 // was saved in (plain Blob array, single photoBlob, etc.).
@@ -111,24 +153,23 @@ function obsPhotos(obs) {
 
 async function getAllReports() {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  const reports = await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
     const req = tx.objectStore(STORE_NAME).getAll();
-    req.onsuccess = () => {
-      const reports = req.result || [];
-      reports.sort((a, b) => b.createdAt - a.createdAt);
-      resolve(reports);
-    };
+    req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
+  reports.sort((a, b) => b.createdAt - a.createdAt);
+  return reports.map(buffersToBlobsAfterRead);
 }
 
 async function saveReport(report) {
+  const safeReport = await blobsToBuffersForWrite(report);
   return withRetry(async () => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
-      tx.objectStore(STORE_NAME).put(report);
+      tx.objectStore(STORE_NAME).put(safeReport);
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
@@ -138,11 +179,12 @@ async function saveReport(report) {
 
 async function getReportById(id) {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  const report = await new Promise((resolve, reject) => {
     const req = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(id);
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
+  return report ? buffersToBlobsAfterRead(report) : null;
 }
 
 async function deleteReportById(id) {
@@ -413,33 +455,38 @@ async function __testBackupRoundtrip() {
 
 async function storeGetAll(storeName) {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  const records = await new Promise((resolve, reject) => {
     const req = db.transaction(storeName, "readonly").objectStore(storeName).getAll();
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
+  return records.map(buffersToBlobsAfterRead);
 }
 
 async function storeGet(storeName, id) {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  const record = await new Promise((resolve, reject) => {
     const req = db.transaction(storeName, "readonly").objectStore(storeName).get(id);
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
+  return record ? buffersToBlobsAfterRead(record) : null;
 }
 
 // Same internal retry (withRetry) that saveReport() already relies on —
 // covers the same transient failures (a brief lock, a just-dropped
 // connection) for every other store (monthly schools/template/
 // submissions, scene tracking/templates) instead of failing on the
-// first hiccup.
+// first hiccup. Also runs every record through the same WebKit-safe
+// Blob→ArrayBuffer conversion saveReport() uses (monthly-photo
+// submissions store Blobs too).
 async function storePut(storeName, record) {
+  const safeRecord = await blobsToBuffersForWrite(record);
   return withRetry(async () => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(storeName, "readwrite");
-      tx.objectStore(storeName).put(record);
+      tx.objectStore(storeName).put(safeRecord);
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
