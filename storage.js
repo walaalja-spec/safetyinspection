@@ -230,9 +230,22 @@ function blobToDataUrl(blob) {
   });
 }
 
-async function dataUrlToBlob(dataUrl) {
-  const res = await fetch(dataUrl);
-  return res.blob();
+// Deliberately does NOT use fetch(dataUrl) — that depends on the network
+// stack (and, in this app, gets intercepted by the service worker's own
+// fetch handler), which turned out to fail unpredictably ("Failed to
+// fetch") purely for data: URLs, silently breaking every restore of a
+// report that had a photo. Decoding the base64 payload directly has no
+// such dependency.
+function dataUrlToBlob(dataUrl) {
+  const commaIndex = dataUrl.indexOf(",");
+  const header = dataUrl.slice(0, commaIndex);
+  const base64 = dataUrl.slice(commaIndex + 1);
+  const mimeMatch = header.match(/^data:([^;]+);base64$/);
+  const mime = mimeMatch ? mimeMatch[1] : "application/octet-stream";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 // Generic deep (de)serializers — walk any value (report, school, monthly
@@ -275,6 +288,23 @@ async function deserializeFromBackup(value) {
 }
 
 const BACKUP_VERSION = 2;
+// Informational only (shown for diagnostics/support) — not tied to any
+// version-gated migration logic.
+const APP_VERSION = "2.0.0";
+
+// All stores currently in the database, and the exact key each one
+// occupies in a backup file's `stores` object. Single source of truth
+// for exportBackupBlob(), importBackupFile(), the snapshot/rollback
+// helpers, and __storageHealthCheck() — adding a new store only means
+// adding one entry here.
+const BACKUP_STORE_MAP = {
+  reports: STORE_NAME,
+  monthly_schools: MONTHLY_SCHOOLS_STORE,
+  monthly_templates: MONTHLY_TEMPLATE_STORE,
+  monthly_submissions: MONTHLY_SUBMISSIONS_STORE,
+  scene_templates: SCENE_TEMPLATE_STORE,
+  scene_tracking: SCENE_TRACKING_STORE
+};
 
 async function exportBackupBlob() {
   const [reports, schools, templates, submissions, sceneTemplates, sceneTracking] = await Promise.all([
@@ -288,6 +318,7 @@ async function exportBackupBlob() {
 
   const payload = {
     backupVersion: BACKUP_VERSION,
+    appVersion: APP_VERSION,
     exportedAt: Date.now(),
     stores: {
       reports: await serializeForBackup(reports),
@@ -303,13 +334,79 @@ async function exportBackupBlob() {
   return new Blob([json], { type: "application/json" });
 }
 
+// Takes a full, in-memory snapshot of every store — used right before a
+// restore so a failure partway through can be rolled back exactly to
+// this state (see importBackupFile()).
+async function snapshotAllStores() {
+  const snapshot = {};
+  for (const key of Object.keys(BACKUP_STORE_MAP)) {
+    snapshot[key] = key === "reports" ? await getAllReports() : await storeGetAll(BACKUP_STORE_MAP[key]);
+  }
+  return snapshot;
+}
+
+// Restores every store to exactly the given snapshot: re-writes every
+// record that was there before (undoing any overwrite the failed import
+// made), and deletes any record the partial import newly added that
+// wasn't present in the snapshot. Used only when a restore fails
+// partway through, so the database never ends up half-restored.
+async function restoreFromSnapshot(snapshot) {
+  for (const key of Object.keys(BACKUP_STORE_MAP)) {
+    const storeName = BACKUP_STORE_MAP[key];
+    const originalRecords = snapshot[key] || [];
+    const originalIds = new Set(originalRecords.map((r) => r.id));
+
+    for (const rec of originalRecords) {
+      if (key === "reports") await saveReport(rec);
+      else await storePut(storeName, rec);
+    }
+
+    const currentRecords = key === "reports" ? await getAllReports() : await storeGetAll(storeName);
+    for (const rec of currentRecords) {
+      if (!originalIds.has(rec.id)) {
+        if (key === "reports") await deleteReportById(rec.id);
+        else await storeDelete(storeName, rec.id);
+      }
+    }
+  }
+}
+
+// Structural validation for an imported backup file, run before a single
+// byte is written to IndexedDB. Deliberately tolerant of unknown/extra
+// fields (forward-compatible with future stores/fields) but rejects
+// anything that isn't recognizably a backup at all.
+function validateBackupPayload(data) {
+  if (!data || typeof data !== "object") {
+    throw new Error("invalid_backup");
+  }
+  if (data.stores && typeof data.stores === "object" && !Array.isArray(data.stores)) {
+    if (data.backupVersion !== undefined) {
+      if (typeof data.backupVersion !== "number" || !Number.isInteger(data.backupVersion) || data.backupVersion < 1) {
+        throw new Error("invalid_backup_version");
+      }
+    }
+    return; // versioned format — fine, even if some/all store arrays are empty
+  }
+  if (Array.isArray(data.reports)) {
+    return; // original pre-versioned format: reports only
+  }
+  throw new Error("invalid_backup");
+}
+
 // Restores a backup file. Never touches IndexedDB until every record in
-// the file has been successfully decoded (Base64 → Blob) — an invalid
-// or corrupted file fails before anything is written, so existing data
-// is never at risk. A single unreadable record is skipped (and counted)
-// rather than failing the whole import. Writes use `put` (upsert by id)
-// exactly like the rest of the app already does, so importing is always
-// additive/merging — it never clears existing data.
+// the file has been successfully validated + decoded (Base64 → Blob) —
+// an invalid or corrupted file fails before anything is written, so
+// existing data is never at risk. A single unreadable record is skipped
+// (and counted) rather than failing the whole import. Successful writes
+// use `put` (upsert by id) exactly like the rest of the app already
+// does, so a successful import is always additive/merging — it never
+// clears existing data.
+//
+// Safety net for the write phase itself: the current database is
+// snapshotted right before any write, and if anything throws partway
+// through writing (e.g. a quota error on the 500th record), every store
+// is rolled back to that exact snapshot — the database is never left
+// half-restored.
 //
 // Handles both the current { backupVersion, stores } format and the
 // original pre-versioned format that only ever held `reports`.
@@ -322,10 +419,12 @@ async function importBackupFile(file) {
     throw new Error("invalid_json");
   }
 
+  validateBackupPayload(data); // throws invalid_backup / invalid_backup_version — nothing written yet
+
   let stores;
-  if (data && typeof data === "object" && data.stores && typeof data.stores === "object") {
+  if (data.stores && typeof data.stores === "object") {
     stores = data.stores;
-  } else if (data && Array.isArray(data.reports)) {
+  } else {
     // Original backup format (pre-backupVersion): reports only.
     stores = {
       reports: data.reports,
@@ -335,8 +434,6 @@ async function importBackupFile(file) {
       scene_templates: [],
       scene_tracking: []
     };
-  } else {
-    throw new Error("invalid_backup");
   }
 
   const reportsIn = Array.isArray(stores.reports) ? stores.reports : [];
@@ -377,37 +474,50 @@ async function importBackupFile(file) {
   const readySceneTemplates = await decode(sceneTemplatesIn, "scene_templates");
   const readySceneTracking = await decode(sceneTrackingIn, "scene_tracking");
 
-  // Phase 2: only now, after decoding succeeded, write to IndexedDB.
-  for (const r of readyReports) {
-    if (!r || !r.id) { summary.skipped++; continue; }
-    r.observations = Array.isArray(r.observations) ? r.observations : [];
-    await saveReport(r);
-    summary.reports++;
-  }
-  for (const s of readySchools) {
-    if (!s || !s.id) { summary.skipped++; continue; }
-    await storePut(MONTHLY_SCHOOLS_STORE, s);
-    summary.monthly_schools++;
-  }
-  for (const tpl of readyTemplates) {
-    if (!tpl || !tpl.id) { summary.skipped++; continue; }
-    await storePut(MONTHLY_TEMPLATE_STORE, tpl);
-    summary.monthly_templates++;
-  }
-  for (const sub of readySubmissions) {
-    if (!sub || !sub.id) { summary.skipped++; continue; }
-    await storePut(MONTHLY_SUBMISSIONS_STORE, sub);
-    summary.monthly_submissions++;
-  }
-  for (const tpl of readySceneTemplates) {
-    if (!tpl || !tpl.id) { summary.skipped++; continue; }
-    await storePut(SCENE_TEMPLATE_STORE, tpl);
-    summary.scene_templates++;
-  }
-  for (const tr of readySceneTracking) {
-    if (!tr || !tr.id) { summary.skipped++; continue; }
-    await storePut(SCENE_TRACKING_STORE, tr);
-    summary.scene_tracking++;
+  // Phase 2: only now, after validation + decoding succeeded, write to
+  // IndexedDB — guarded by the snapshot/rollback safety net.
+  const preRestoreSnapshot = await snapshotAllStores();
+  try {
+    for (const r of readyReports) {
+      if (!r || !r.id) { summary.skipped++; continue; }
+      r.observations = Array.isArray(r.observations) ? r.observations : [];
+      await saveReport(r);
+      summary.reports++;
+    }
+    for (const s of readySchools) {
+      if (!s || !s.id) { summary.skipped++; continue; }
+      await storePut(MONTHLY_SCHOOLS_STORE, s);
+      summary.monthly_schools++;
+    }
+    for (const tpl of readyTemplates) {
+      if (!tpl || !tpl.id) { summary.skipped++; continue; }
+      await storePut(MONTHLY_TEMPLATE_STORE, tpl);
+      summary.monthly_templates++;
+    }
+    for (const sub of readySubmissions) {
+      if (!sub || !sub.id) { summary.skipped++; continue; }
+      await storePut(MONTHLY_SUBMISSIONS_STORE, sub);
+      summary.monthly_submissions++;
+    }
+    for (const tpl of readySceneTemplates) {
+      if (!tpl || !tpl.id) { summary.skipped++; continue; }
+      await storePut(SCENE_TEMPLATE_STORE, tpl);
+      summary.scene_templates++;
+    }
+    for (const tr of readySceneTracking) {
+      if (!tr || !tr.id) { summary.skipped++; continue; }
+      await storePut(SCENE_TRACKING_STORE, tr);
+      summary.scene_tracking++;
+    }
+  } catch (err) {
+    console.error("Restore failed partway through — rolling back to the pre-restore snapshot:", err);
+    try {
+      await restoreFromSnapshot(preRestoreSnapshot);
+    } catch (rollbackErr) {
+      console.error("CRITICAL: rollback itself failed after a partial restore failure:", rollbackErr);
+      throw new Error("restore_failed_rollback_failed");
+    }
+    throw new Error("restore_failed_rolled_back");
   }
 
   return summary;
@@ -454,6 +564,100 @@ async function __testBackupRoundtrip() {
 
   const result = { backupVersion: parsed.backupVersion, counts, idsMatch, importSummary, passed };
   console.log("Backup roundtrip test:", result);
+  return result;
+}
+
+// ---------------------------------------------------------------------
+// Storage health check — NOT exposed in the UI (the "🔍 فحص البيانات
+// المخزّنة" screen is a separate, simpler, read-only display for
+// end users). This is an internal diagnostic for structural problems —
+// missing ids, missing/empty photo Blobs, dangling references, etc. —
+// without changing anything. Run manually from the browser console:
+//   await __storageHealthCheck()
+// ---------------------------------------------------------------------
+async function __storageHealthCheck() {
+  const issues = [];
+  const add = (level, message) => issues.push({ level, message });
+
+  let dbAvailable = true;
+  try {
+    await openDB();
+  } catch (e) {
+    dbAvailable = false;
+    add("critical", "IndexedDB unavailable: " + e.message);
+  }
+
+  const result = { dbAvailable, storeCounts: {}, issues };
+  if (!dbAvailable) {
+    result.healthy = false;
+    return result;
+  }
+
+  const reports = await getAllReports();
+  result.storeCounts.reports = reports.length;
+  reports.forEach((r, i) => {
+    if (!r.id) { add("critical", `Report at index ${i} has no id`); return; }
+    if (!Array.isArray(r.observations)) {
+      add("warning", `Report ${r.id} has no observations array`);
+      return;
+    }
+    r.observations.forEach((obs, oi) => {
+      if (typeof obs.text !== "string") add("warning", `Report ${r.id} observation #${oi} is missing text`);
+      obsPhotos(obs).forEach((p, pi) => {
+        if (!p || !(p.blob instanceof Blob) || p.blob.size === 0) {
+          add("critical", `Report ${r.id} observation #${oi} photo #${pi} has a missing/empty Blob`);
+        }
+      });
+      if (obs.audioBlob && !(obs.audioBlob instanceof Blob)) {
+        add("critical", `Report ${r.id} observation #${oi} has a non-Blob audioBlob`);
+      }
+      if (obs.followUp && obs.followUp.afterPhoto && !(obs.followUp.afterPhoto.blob instanceof Blob)) {
+        add("critical", `Report ${r.id} observation #${oi} has a non-Blob follow-up after-photo`);
+      }
+    });
+  });
+
+  const schools = await storeGetAll(MONTHLY_SCHOOLS_STORE);
+  result.storeCounts.monthly_schools = schools.length;
+  const schoolIds = new Set(schools.map((s) => s.id));
+  schools.forEach((s) => { if (!s.id) add("critical", "A monthly school has no id"); });
+
+  const submissions = await storeGetAll(MONTHLY_SUBMISSIONS_STORE);
+  result.storeCounts.monthly_submissions = submissions.length;
+  submissions.forEach((sub) => {
+    if (!sub.id) { add("critical", "A monthly submission has no id"); return; }
+    if (sub.schoolId && !schoolIds.has(sub.schoolId)) {
+      add("warning", `Monthly submission ${sub.id} references a school that no longer exists (${sub.schoolId})`);
+    }
+    Object.entries(sub.photos || {}).forEach(([slotId, entry]) => {
+      if (!entry || !(entry.blob instanceof Blob) || entry.blob.size === 0) {
+        add("critical", `Monthly submission ${sub.id} slot ${slotId} has a missing/empty Blob`);
+      }
+    });
+  });
+
+  result.storeCounts.monthly_templates = (await storeGetAll(MONTHLY_TEMPLATE_STORE)).length;
+  result.storeCounts.scene_templates = (await storeGetAll(SCENE_TEMPLATE_STORE)).length;
+
+  const sceneTracking = await storeGetAll(SCENE_TRACKING_STORE);
+  result.storeCounts.scene_tracking = sceneTracking.length;
+  sceneTracking.forEach((tr) => {
+    if (!tr.id) { add("critical", "A scene-tracking record has no id"); return; }
+    if (tr.schoolId && !schoolIds.has(tr.schoolId)) {
+      add("warning", `Scene tracking ${tr.id} references a school that no longer exists (${tr.schoolId})`);
+    }
+  });
+
+  try {
+    await exportBackupBlob();
+    result.backupSerializationOk = true;
+  } catch (e) {
+    result.backupSerializationOk = false;
+    add("critical", "exportBackupBlob() failed: " + e.message);
+  }
+
+  result.healthy = issues.filter((i) => i.level === "critical").length === 0;
+  console.log("Storage health check:", result);
   return result;
 }
 

@@ -161,7 +161,9 @@ const translations = {
     backupExported: "تم تصدير النسخة الاحتياطية.",
     backupFailed: "تعذر إنشاء النسخة الاحتياطية.",
     backupImported: (s) => `تم استيراد ${s.reports} زيارة، ${s.monthly_schools} مدرسة، ${s.monthly_submissions} أرشيف صور شهرية.${s.skipped ? ` (تعذر قراءة ${s.skipped} سجل)` : ""}`,
-    backupImportFailed: "تعذر استيراد الملف. تأكدي أنه نسخة احتياطية صحيحة.",
+    backupImportFailed: "تعذر استيراد الملف. تأكدي أنه نسخة احتياطية صحيحة. بياناتك الحالية سليمة ولم تتأثر.",
+    backupRestoreRolledBack: "تعذرت الاستعادة أثناء التنفيذ، فتم التراجع تلقائيًا. بياناتك الأصلية سليمة كما كانت.",
+    backupRestoreCritical: "حدث خطأ أثناء الاستعادة. افتحي «فحص البيانات المخزّنة» للتأكد من سلامة بياناتك.",
     btnDataDiagnostic: "🔍 فحص البيانات المخزّنة",
     diagnosticHeading: "فحص البيانات المخزّنة",
     diagnosticIntro: "هذه الشاشة للقراءة فقط — تعرض ما هو محفوظ فعليًا على هذا الجهاز الآن، ولا تُعدّل أو تحذف أي شيء.",
@@ -412,7 +414,9 @@ const translations = {
     backupExported: "Backup exported.",
     backupFailed: "Couldn't create the backup.",
     backupImported: (s) => `Imported ${s.reports} visit${s.reports === 1 ? "" : "s"}, ${s.monthly_schools} school${s.monthly_schools === 1 ? "" : "s"}, ${s.monthly_submissions} monthly photo record${s.monthly_submissions === 1 ? "" : "s"}.${s.skipped ? ` (${s.skipped} record${s.skipped === 1 ? "" : "s"} couldn't be read)` : ""}`,
-    backupImportFailed: "Couldn't import the file. Make sure it's a valid backup.",
+    backupImportFailed: "Couldn't import the file. Make sure it's a valid backup. Your current data is safe and untouched.",
+    backupRestoreRolledBack: "The restore failed partway through and was automatically rolled back. Your original data is intact.",
+    backupRestoreCritical: "Something went wrong during restore. Open “Check Stored Data” to verify your data is intact.",
     btnDataDiagnostic: "🔍 Check Stored Data",
     diagnosticHeading: "Check Stored Data",
     diagnosticIntro: "Read-only -- shows exactly what's actually saved on this device right now. Never edits or deletes anything.",
@@ -890,17 +894,27 @@ function renderSearchObservationResults(query) {
   });
 }
 
+let isAddingSchoolHome = false;
 document.getElementById("addSchoolBtnHome").addEventListener("click", async () => {
+  if (isAddingSchoolHome) return; // guards against a duplicate school record from a rapid double-tap
   const input = document.getElementById("newSchoolNameInputHome");
   const name = input.value.trim();
   if (!name) {
     showToast(t("needSchoolName"), "warning");
     return;
   }
-  const newSchool = await addMonthlySchool(name);
-  input.value = "";
-  await renderHome();
-  await renderSchoolsHomeList();
+  isAddingSchoolHome = true;
+  const btn = document.getElementById("addSchoolBtnHome");
+  btn.disabled = true;
+  try {
+    await addMonthlySchool(name);
+    input.value = "";
+    await renderHome();
+    await renderSchoolsHomeList();
+  } finally {
+    btn.disabled = false;
+    isAddingSchoolHome = false;
+  }
 });
 
 document.getElementById("searchInput").addEventListener("input", renderSchoolsHomeList);
@@ -1221,7 +1235,14 @@ document.getElementById("importBackupInput").addEventListener("change", async (e
     renderHome();
   } catch (err) {
     console.error(err);
-    showToast(t("backupImportFailed"), "error");
+    if (err.message === "restore_failed_rolled_back") {
+      showToast(t("backupRestoreRolledBack"), "warning");
+    } else if (err.message === "restore_failed_rollback_failed") {
+      showToast(t("backupRestoreCritical"), "error");
+    } else {
+      showToast(t("backupImportFailed"), "error");
+    }
+    renderHome();
   }
 });
 

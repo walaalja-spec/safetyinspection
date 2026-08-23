@@ -85,17 +85,27 @@ async function renderMonthlySchoolsList() {
   });
 }
 
+let isAddingMonthlySchool = false;
 document.getElementById("addSchoolBtn").addEventListener("click", async () => {
+  if (isAddingMonthlySchool) return; // guards against a duplicate school record from a rapid double-tap
   const input = document.getElementById("newSchoolNameInput");
   const name = input.value.trim();
   if (!name) {
     showToast(t("needSchoolName"), "warning");
     return;
   }
-  await addMonthlySchool(name);
-  input.value = "";
-  monthlySchools = await getAllMonthlySchools();
-  renderMonthlySchoolsList();
+  isAddingMonthlySchool = true;
+  const btn = document.getElementById("addSchoolBtn");
+  btn.disabled = true;
+  try {
+    await addMonthlySchool(name);
+    input.value = "";
+    monthlySchools = await getAllMonthlySchools();
+    renderMonthlySchoolsList();
+  } finally {
+    btn.disabled = false;
+    isAddingMonthlySchool = false;
+  }
 });
 
 // ---------- Template settings ----------
