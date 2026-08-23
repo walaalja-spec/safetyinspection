@@ -75,6 +75,24 @@
         <button id="importBackupBtn" class="btn btn-text" data-i18n="btnImportBackup">📂 استيراد نسخة</button>
       </div>
       <input type="file" id="importBackupInput" accept="application/json" hidden>
+      <button id="dataDiagnosticBtn" class="btn btn-text" data-i18n="btnDataDiagnostic">🔍 فحص البيانات المخزّنة</button>
+    </section>
+
+    <!-- SCREEN: Data diagnostic — read-only, shows exactly what's really
+         stored on this device right now (no DevTools/Mac needed), so a
+         report of "missing" notes/photos can be checked directly. Never
+         edits or deletes anything. -->
+    <section id="screen-data-diagnostic" class="screen">
+      <h2 data-i18n="diagnosticHeading">فحص البيانات المخزّنة</h2>
+      <p class="muted" data-i18n="diagnosticIntro">هذه الشاشة للقراءة فقط — تعرض ما هو محفوظ فعليًا على هذا الجهاز الآن، ولا تُعدّل أو تحذف أي شيء.</p>
+
+      <input type="search" id="diagnosticSearchInput" class="search-input" data-i18n-placeholder="diagnosticSearchPlaceholder" placeholder="ابحثي باسم المدرسة أو عنوان التقرير (اتركيه فارغًا لعرض الكل)" autocomplete="off" enterkeyhint="search">
+
+      <p id="diagnosticSummary" class="muted"></p>
+      <div id="diagnosticResults"></div>
+      <p id="noDiagnosticResults" class="empty-msg" style="display:none;" data-i18n="diagnosticNoResults">لا يوجد تقرير مطابق لهذا البحث.</p>
+
+      <button id="diagnosticBackBtn" class="btn btn-text" data-i18n="btnBackHome">رجوع للرئيسية</button>
     </section>
 
     <!-- SCREEN: Schools (search + full list) — opened from the home

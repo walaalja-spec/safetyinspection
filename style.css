@@ -427,6 +427,16 @@ html[dir="ltr"] select { background-position: right 14px center; }
 
 .pdf-link { text-align: center; text-decoration: none; box-sizing: border-box; }
 
+/* ---------- Data diagnostic (read-only) ---------- */
+.diagnostic-obs-row {
+  padding: 10px 0; border-top: 1px solid var(--line);
+}
+.diagnostic-obs-row:first-of-type { border-top: none; }
+.diagnostic-draft-note {
+  background: var(--amber-100); color: #7a5c00; border: 1px solid #f0ddac;
+  border-radius: var(--r-sm); padding: 8px 12px; font-size: var(--fs-sm); margin: 8px 0;
+}
+
 /* ---------- Pending-save indicator ---------- */
 /* Small, non-intrusive: only ever visible while at least one write is
    queued for a background retry (see pendingSaveQueue et al.) — hidden

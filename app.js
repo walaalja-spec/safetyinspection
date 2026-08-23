@@ -162,6 +162,17 @@ const translations = {
     backupFailed: "تعذر إنشاء النسخة الاحتياطية.",
     backupImported: (s) => `تم استيراد ${s.reports} زيارة، ${s.monthly_schools} مدرسة، ${s.monthly_submissions} أرشيف صور شهرية.${s.skipped ? ` (تعذر قراءة ${s.skipped} سجل)` : ""}`,
     backupImportFailed: "تعذر استيراد الملف. تأكدي أنه نسخة احتياطية صحيحة.",
+    btnDataDiagnostic: "🔍 فحص البيانات المخزّنة",
+    diagnosticHeading: "فحص البيانات المخزّنة",
+    diagnosticIntro: "هذه الشاشة للقراءة فقط — تعرض ما هو محفوظ فعليًا على هذا الجهاز الآن، ولا تُعدّل أو تحذف أي شيء.",
+    diagnosticSearchPlaceholder: "ابحثي باسم المدرسة أو عنوان التقرير (اتركيه فارغًا لعرض الكل)",
+    diagnosticSummary: (total, matched) => `إجمالي التقارير المخزّنة: ${total} — المطابقة للبحث: ${matched}`,
+    diagnosticNoResults: "لا يوجد تقرير مطابق لهذا البحث.",
+    diagnosticNoPhotos: "لا صور في هذه الملاحظة.",
+    diagnosticNoText: "(بدون نص)",
+    diagnosticNoObs: "لا توجد ملاحظات محفوظة في هذا التقرير.",
+    diagnosticObsCount: (n) => `عدد الملاحظات المحفوظة فعليًا: ${n}`,
+    diagnosticHasDraft: "يوجد تعديل غير محفوظ رسميًا بعد",
     editReportHeading: "تعديل بيانات التقرير",
     btnSaveChanges: "حفظ التعديلات",
     btnEditReport: "✏️ تعديل بيانات التقرير",
@@ -402,6 +413,17 @@ const translations = {
     backupFailed: "Couldn't create the backup.",
     backupImported: (s) => `Imported ${s.reports} visit${s.reports === 1 ? "" : "s"}, ${s.monthly_schools} school${s.monthly_schools === 1 ? "" : "s"}, ${s.monthly_submissions} monthly photo record${s.monthly_submissions === 1 ? "" : "s"}.${s.skipped ? ` (${s.skipped} record${s.skipped === 1 ? "" : "s"} couldn't be read)` : ""}`,
     backupImportFailed: "Couldn't import the file. Make sure it's a valid backup.",
+    btnDataDiagnostic: "🔍 Check Stored Data",
+    diagnosticHeading: "Check Stored Data",
+    diagnosticIntro: "Read-only -- shows exactly what's actually saved on this device right now. Never edits or deletes anything.",
+    diagnosticSearchPlaceholder: "Search by school name or report title (leave empty to show all)",
+    diagnosticSummary: (total, matched) => `Total stored reports: ${total} — matching search: ${matched}`,
+    diagnosticNoResults: "No report matches this search.",
+    diagnosticNoPhotos: "No photos on this observation.",
+    diagnosticNoText: "(no text)",
+    diagnosticNoObs: "No observations saved in this report.",
+    diagnosticObsCount: (n) => `Observations actually saved: ${n}`,
+    diagnosticHasDraft: "Has an unsaved draft edit",
     editReportHeading: "Edit Report Details",
     btnSaveChanges: "Save Changes",
     btnEditReport: "✏️ Edit Report Details",
@@ -635,7 +657,8 @@ const screenBackButtonMap = {
   "screen-unlinked-visits": "unlinkedVisitsBackBtn",
   "screen-ai-review": "aiCancelBtn",
   "screen-all-reports": "allReportsBackBtn",
-  "screen-schools": "schoolsScreenBackBtn"
+  "screen-schools": "schoolsScreenBackBtn",
+  "screen-data-diagnostic": "diagnosticBackBtn"
 };
 
 function showScreen(id) {
@@ -1201,6 +1224,70 @@ document.getElementById("importBackupInput").addEventListener("change", async (e
     showToast(t("backupImportFailed"), "error");
   }
 });
+
+// ---------- Data diagnostic (read-only) ----------
+// Built so a report of "missing" notes/photos can be checked directly on
+// the device that has them (no DevTools/Mac needed): reads straight from
+// IndexedDB via the same getAllReports()/obsPhotos() the rest of the app
+// uses, and only ever displays — never edits or deletes.
+async function renderDataDiagnostic(keyword) {
+  const kw = (keyword || "").trim();
+  const allReports = await getAllReports();
+  const matches = kw
+    ? allReports.filter((r) => (r.location || "").includes(kw) || (r.title || "").includes(kw))
+    : allReports;
+
+  document.getElementById("diagnosticSummary").textContent = t("diagnosticSummary")(allReports.length, matches.length);
+
+  const resultsEl = document.getElementById("diagnosticResults");
+  const emptyEl = document.getElementById("noDiagnosticResults");
+  resultsEl.innerHTML = "";
+
+  if (matches.length === 0) {
+    emptyEl.style.display = "block";
+    return;
+  }
+  emptyEl.style.display = "none";
+
+  matches.forEach((r) => {
+    const card = document.createElement("div");
+    card.className = "report-card field-section";
+
+    const obsList = (r.observations || []).map((o, i) => {
+      const photos = obsPhotos(o);
+      const thumbs = photos.length
+        ? `<div class="obs-thumb-grid">${photos.map((p) => `<img src="${URL.createObjectURL(p.blob)}" class="obs-thumb" alt="">`).join("")}</div>`
+        : `<p class="muted">${t("diagnosticNoPhotos")}</p>`;
+      return `
+        <div class="diagnostic-obs-row">
+          <p class="obs-text"><strong>${i + 1}.</strong> ${escapeHtml(o.text || t("diagnosticNoText"))}</p>
+          ${thumbs}
+        </div>
+      `;
+    }).join("");
+
+    const draftNote = r.draft
+      ? `<p class="diagnostic-draft-note">⚠️ ${t("diagnosticHasDraft")}: ${escapeHtml((r.draft.text || "").slice(0, 100))}</p>`
+      : "";
+
+    card.innerHTML = `
+      <h4>${escapeHtml(r.title || "")}</h4>
+      <p class="muted">${escapeHtml(r.location || "")} — ${escapeHtml(r.date || "")}</p>
+      <p class="muted">${t("diagnosticObsCount")((r.observations || []).length)}</p>
+      ${draftNote}
+      ${obsList || `<p class="muted">${t("diagnosticNoObs")}</p>`}
+    `;
+    resultsEl.appendChild(card);
+  });
+}
+
+document.getElementById("dataDiagnosticBtn").addEventListener("click", () => {
+  document.getElementById("diagnosticSearchInput").value = "";
+  renderDataDiagnostic("");
+  showScreen("screen-data-diagnostic");
+});
+document.getElementById("diagnosticSearchInput").addEventListener("input", (e) => renderDataDiagnostic(e.target.value));
+document.getElementById("diagnosticBackBtn").addEventListener("click", () => showScreen("screen-home"));
 
 document.getElementById("newReportBtn").addEventListener("click", () => {
   document.getElementById("newReportForm").reset();
