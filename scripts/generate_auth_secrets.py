@@ -42,7 +42,50 @@ def derive_password_hash(password: str, salt: str) -> str:
     ).hex()
 
 
+def verify() -> int:
+    """Check an existing salt+hash pair against a password.
+
+    Cloudflare secrets cannot be read back once saved, so if login fails
+    there is otherwise no way to tell a wrong password from a salt and
+    hash that came from two different runs of this script -- each run
+    generates a fresh random salt, so mixing them produces values that
+    look perfectly well-formed but can never match.
+
+    Paste the salt and hash you still have on screen, type the password,
+    and this says definitively whether that combination works.
+    """
+    print("\nVerify an existing salt + hash pair")
+    print("-----------------------------------")
+    print("Paste the values you set (or are about to set) in Cloudflare.\n")
+
+    if not sys.stdin.isatty():
+        print("stdin is not a terminal - run this directly.", file=sys.stderr)
+        return 1
+
+    salt = input("AUTH_PASSWORD_SALT: ").strip()
+    stored_hash = input("AUTH_PASSWORD_HASH: ").strip().lower()
+    if not salt or not stored_hash:
+        print("\nBoth values are required.", file=sys.stderr)
+        return 1
+
+    password = getpass("Password:           ")
+    if derive_password_hash(password, salt) == stored_hash:
+        print("\nMATCH - this password works with this salt and hash.")
+        print("If login still fails, the values in Cloudflare differ from what you")
+        print("just pasted here, or they are set on a different environment.\n")
+        return 0
+
+    print("\nNO MATCH - this password does not go with this salt and hash.")
+    print("Most likely the salt and hash came from two different runs of this")
+    print("script. Re-run it once and copy all three values from that single")
+    print("output.\n")
+    return 1
+
+
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "verify":
+        return verify()
+
     print("\nCloud sign-in secrets for WJ Safety")
     print("-----------------------------------")
     print("Your password is not shown as you type, and is never saved anywhere.\n")
