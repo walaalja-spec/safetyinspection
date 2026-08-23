@@ -49,16 +49,64 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/analyze" && request.method === "POST") {
-      return handleAnalyze(request, env);
+      return handleAnalyze(request, env, url);
     }
 
     // Everything else (index.html, app.js, style.css, ...) is served
     // straight from the static assets bound to this Worker.
-    return env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+    return withSecurityHeaders(assetResponse);
   }
 };
 
-async function handleAnalyze(request, env) {
+// index.html also carries this same policy via a <meta> tag (so it still
+// applies if these files are ever served a different way, e.g. a plain
+// static host) — but `frame-ancestors` only takes effect from a real HTTP
+// header, never from <meta>, so it's set here rather than duplicated
+// uselessly there. Applied to every response (HTML, JS, CSS, images).
+function withSecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  headers.set(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src https://fonts.gstatic.com; img-src 'self' blob: data:; " +
+      "connect-src 'self'; object-src 'none'; base-uri 'self'; " +
+      "form-action 'self'; manifest-src 'self'; frame-ancestors 'none';"
+  );
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+// This app has no login/session layer by design (single-device, local
+// storage), so /analyze can't be gated by a real auth check. This is a
+// best-effort layer against the two cheapest abuse paths — a browser
+// page on another origin driving traffic here, or a request that never
+// came from this app's own UI at all — NOT a substitute for real auth;
+// a determined caller can still spoof these headers directly. Absent
+// Origin/Referer (some legitimate same-origin fetches omit them) is
+// allowed through rather than blocked, to avoid breaking real usage.
+function isAllowedOrigin(request, selfOrigin) {
+  const origin = request.headers.get("Origin");
+  if (origin) return origin === selfOrigin;
+  const referer = request.headers.get("Referer");
+  if (referer) return referer === selfOrigin || referer.startsWith(selfOrigin + "/");
+  return true;
+}
+
+// Generous upper bounds — well above what this app itself ever sends
+// (observation photos are compressed client-side to ~1600px/0.85 quality
+// before reaching here), just to cap the cost/CPU blast radius of a
+// direct, non-UI call to this endpoint.
+const MAX_TEXT_CHARS = 8000;
+const MAX_IMAGE_BASE64_CHARS = 8_000_000; // ~6MB decoded
+
+async function handleAnalyze(request, env, url) {
+  if (!isAllowedOrigin(request, url.origin)) {
+    return jsonResponse({ error: "forbidden" }, 403);
+  }
+
   let body;
   try {
     body = await request.json();
@@ -71,6 +119,9 @@ async function handleAnalyze(request, env) {
 
   if (!text && !imageBase64) {
     return jsonResponse({ error: "no_input" }, 400);
+  }
+  if (text.length > MAX_TEXT_CHARS || (imageBase64 && imageBase64.length > MAX_IMAGE_BASE64_CHARS)) {
+    return jsonResponse({ error: "payload_too_large" }, 413);
   }
 
   const apiKey = env.OPENAI_API_KEY;

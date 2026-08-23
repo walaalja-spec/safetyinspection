@@ -555,10 +555,18 @@ function showToast(message, type = "") {
   toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
+// Text-node round-tripping (textContent -> innerHTML) escapes & < > but
+// NOT quote characters, since quotes aren't special inside a text node.
+// This app also interpolates escapeHtml() output inside quoted HTML
+// attributes (e.g. monthly.js's `value="${escapeHtml(slot.label)}"`), so
+// a value containing `"` could otherwise break out of the attribute and
+// inject new attributes/event handlers. Escaping quotes here makes the
+// same function safe in both contexts; harmless where it's only ever
+// used as text, since &quot;/&#39; render identically to " and '.
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str || "";
-  return div.innerHTML;
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // ---------- Screen navigation ----------
