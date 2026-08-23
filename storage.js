@@ -227,11 +227,13 @@ async function deserializeFromBackup(value) {
 const BACKUP_VERSION = 2;
 
 async function exportBackupBlob() {
-  const [reports, schools, templates, submissions] = await Promise.all([
+  const [reports, schools, templates, submissions, sceneTemplates, sceneTracking] = await Promise.all([
     getAllReports(),
     storeGetAll(MONTHLY_SCHOOLS_STORE),
     storeGetAll(MONTHLY_TEMPLATE_STORE),
-    storeGetAll(MONTHLY_SUBMISSIONS_STORE)
+    storeGetAll(MONTHLY_SUBMISSIONS_STORE),
+    storeGetAll(SCENE_TEMPLATE_STORE),
+    storeGetAll(SCENE_TRACKING_STORE)
   ]);
 
   const payload = {
@@ -241,7 +243,9 @@ async function exportBackupBlob() {
       reports: await serializeForBackup(reports),
       monthly_schools: await serializeForBackup(schools),
       monthly_templates: await serializeForBackup(templates),
-      monthly_submissions: await serializeForBackup(submissions)
+      monthly_submissions: await serializeForBackup(submissions),
+      scene_templates: await serializeForBackup(sceneTemplates),
+      scene_tracking: await serializeForBackup(sceneTracking)
     }
   };
 
@@ -273,7 +277,14 @@ async function importBackupFile(file) {
     stores = data.stores;
   } else if (data && Array.isArray(data.reports)) {
     // Original backup format (pre-backupVersion): reports only.
-    stores = { reports: data.reports, monthly_schools: [], monthly_templates: [], monthly_submissions: [] };
+    stores = {
+      reports: data.reports,
+      monthly_schools: [],
+      monthly_templates: [],
+      monthly_submissions: [],
+      scene_templates: [],
+      scene_tracking: []
+    };
   } else {
     throw new Error("invalid_backup");
   }
@@ -282,8 +293,18 @@ async function importBackupFile(file) {
   const schoolsIn = Array.isArray(stores.monthly_schools) ? stores.monthly_schools : [];
   const templatesIn = Array.isArray(stores.monthly_templates) ? stores.monthly_templates : [];
   const submissionsIn = Array.isArray(stores.monthly_submissions) ? stores.monthly_submissions : [];
+  const sceneTemplatesIn = Array.isArray(stores.scene_templates) ? stores.scene_templates : [];
+  const sceneTrackingIn = Array.isArray(stores.scene_tracking) ? stores.scene_tracking : [];
 
-  const summary = { reports: 0, monthly_schools: 0, monthly_templates: 0, monthly_submissions: 0, skipped: 0 };
+  const summary = {
+    reports: 0,
+    monthly_schools: 0,
+    monthly_templates: 0,
+    monthly_submissions: 0,
+    scene_templates: 0,
+    scene_tracking: 0,
+    skipped: 0
+  };
 
   // Phase 1: decode everything first. Nothing is written to IndexedDB yet.
   const decode = async (list, label) => {
@@ -303,6 +324,8 @@ async function importBackupFile(file) {
   const readySchools = await decode(schoolsIn, "monthly_schools");
   const readyTemplates = await decode(templatesIn, "monthly_templates");
   const readySubmissions = await decode(submissionsIn, "monthly_submissions");
+  const readySceneTemplates = await decode(sceneTemplatesIn, "scene_templates");
+  const readySceneTracking = await decode(sceneTrackingIn, "scene_tracking");
 
   // Phase 2: only now, after decoding succeeded, write to IndexedDB.
   for (const r of readyReports) {
@@ -326,6 +349,16 @@ async function importBackupFile(file) {
     await storePut(MONTHLY_SUBMISSIONS_STORE, sub);
     summary.monthly_submissions++;
   }
+  for (const tpl of readySceneTemplates) {
+    if (!tpl || !tpl.id) { summary.skipped++; continue; }
+    await storePut(SCENE_TEMPLATE_STORE, tpl);
+    summary.scene_templates++;
+  }
+  for (const tr of readySceneTracking) {
+    if (!tr || !tr.id) { summary.skipped++; continue; }
+    await storePut(SCENE_TRACKING_STORE, tr);
+    summary.scene_tracking++;
+  }
 
   return summary;
 }
@@ -343,7 +376,9 @@ async function __testBackupRoundtrip() {
     reports: await getAllReports(),
     monthly_schools: await storeGetAll(MONTHLY_SCHOOLS_STORE),
     monthly_templates: await storeGetAll(MONTHLY_TEMPLATE_STORE),
-    monthly_submissions: await storeGetAll(MONTHLY_SUBMISSIONS_STORE)
+    monthly_submissions: await storeGetAll(MONTHLY_SUBMISSIONS_STORE),
+    scene_templates: await storeGetAll(SCENE_TEMPLATE_STORE),
+    scene_tracking: await storeGetAll(SCENE_TRACKING_STORE)
   });
 
   const before = await snapshot();
@@ -355,14 +390,17 @@ async function __testBackupRoundtrip() {
 
   const idSet = (arr) => arr.map((r) => r.id).sort().join(",");
   const counts = {};
-  for (const key of ["reports", "monthly_schools", "monthly_templates", "monthly_submissions"]) {
+  for (const key of ["reports", "monthly_schools", "monthly_templates", "monthly_submissions", "scene_templates", "scene_tracking"]) {
     counts[key] = { before: before[key].length, after: after[key].length, exported: parsed.stores[key].length };
   }
   const idsMatch = {
     reports: idSet(before.reports) === idSet(after.reports),
-    monthly_schools: idSet(before.monthly_schools) === idSet(after.monthly_schools)
+    monthly_schools: idSet(before.monthly_schools) === idSet(after.monthly_schools),
+    scene_templates: idSet(before.scene_templates) === idSet(after.scene_templates),
+    scene_tracking: idSet(before.scene_tracking) === idSet(after.scene_tracking)
   };
-  const passed = Object.values(counts).every((c) => c.before === c.after) && idsMatch.reports && idsMatch.monthly_schools;
+  const passed = Object.values(counts).every((c) => c.before === c.after) &&
+    idsMatch.reports && idsMatch.monthly_schools && idsMatch.scene_templates && idsMatch.scene_tracking;
 
   const result = { backupVersion: parsed.backupVersion, counts, idsMatch, importSummary, passed };
   console.log("Backup roundtrip test:", result);
