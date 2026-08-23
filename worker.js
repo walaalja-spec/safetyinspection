@@ -775,10 +775,12 @@ async function handlePhotoUpload(request, env, url) {
   const schoolId = url.searchParams.get("schoolId");
   const monthKey = url.searchParams.get("monthKey");
   const slotId = url.searchParams.get("slotId");
+  const clientPhotoId = url.searchParams.get("photoId");
 
   if (!OWNER_TYPES.has(ownerType)) return apiErr("invalid_owner_type", 400);
   if (!isSafeId(ownerId)) return apiErr("invalid_owner_id", 400);
   if (!PHOTO_TYPES.has(photoType)) return apiErr("invalid_photo_type", 400);
+  if (clientPhotoId !== null && !isSafeId(clientPhotoId)) return apiErr("invalid_photo_id", 400);
 
   if (ownerType === "monthly_submission") {
     if (!isSafeId(schoolId) || !isNonEmptyString(monthKey) || !/^\d{4}-\d{2}$/.test(monthKey) || !isSafeId(slotId)) {
@@ -794,7 +796,12 @@ async function handlePhotoUpload(request, env, url) {
   if (bytes.byteLength === 0) return apiErr("empty_body", 400);
   if (bytes.byteLength > MAX_PHOTO_BYTES) return apiErr("payload_too_large", 413);
 
-  const photoId = genId("photo");
+  // A client-supplied id (e.g. sync.js retrying after a dropped response)
+  // makes the upload land at the exact same r2Key every time -- R2's put()
+  // for an unchanged key/content is naturally idempotent, and it lets
+  // handlePhotoConfirm's own r2_key dedup (see below) actually kick in
+  // instead of creating a second orphaned object under a fresh random id.
+  const photoId = clientPhotoId || genId("photo");
   const r2Key = buildPhotoKey({ ownerType, ownerId, photoType, photoId, ext: knownExt, schoolId, monthKey, slotId });
   const checksum = await sha256Hex(bytes);
 

@@ -1810,12 +1810,17 @@ async function handlePhotoInput(e) {
   try {
     if (replacingPhotoIndex !== null) {
       const blob = await compressImage(files[0]);
-      stagedPhotos[replacingPhotoIndex] = { blob, takenAt: Date.now() };
+      // A fresh id, not the replaced photo's old one -- this is a
+      // different image and needs its own cloud sync entry (see sync.js).
+      stagedPhotos[replacingPhotoIndex] = { id: generateId(), blob, takenAt: Date.now() };
       replacingPhotoIndex = null;
     } else {
       for (const file of files) {
         const blob = await compressImage(file);
-        stagedPhotos.push({ blob, takenAt: Date.now() });
+        // Stable id, independent of array position -- same reasoning as
+        // observation ids (see saveCurrentObservation), needed so sync.js
+        // can track each photo's own cloud-upload status individually.
+        stagedPhotos.push({ id: generateId(), blob, takenAt: Date.now() });
       }
     }
     renderPhotosGrid();
@@ -2124,10 +2129,11 @@ async function saveCurrentObservation(extraFields) {
     setObservationSaveUI("idle");
 
     // Cloud sync is queued only *after* the local write above already
-    // succeeded, and only for a genuinely new observation (an edit to an
-    // already-synced one isn't wired up yet -- see sync.js). This never
-    // affects whether the save itself succeeds for the user.
+    // succeeded. This never affects whether the save itself succeeds for
+    // the user.
     if (isNewObservation && typeof enqueueEntitySync === "function") {
+      // Only for a genuinely new observation -- an edit to an
+      // already-synced one isn't wired up yet -- see sync.js.
       enqueueEntitySync("observation", "create", obs.id, {
         id: obs.id,
         visitId: activeReport.id,
@@ -2137,6 +2143,13 @@ async function saveCurrentObservation(extraFields) {
         recommendedAction: obs.recommendedAction || undefined,
         pendingAi: !!obs.pendingAI
       });
+    }
+    // Photos sync on every save, new or edited -- a photo added while
+    // editing an already-synced observation still needs to reach R2.
+    // enqueuePhotosForObservation itself skips any photo already tracked
+    // (queued or synced), so this is safe to call on every save.
+    if (typeof enqueuePhotosForObservation === "function") {
+      enqueuePhotosForObservation(obs.id, obs.photos);
     }
 
     showToast(extraFields && extraFields.pendingAI ? t("offlineAnalyzeSaved") : t("observationSaved"), "success");

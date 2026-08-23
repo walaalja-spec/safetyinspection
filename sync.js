@@ -59,6 +59,36 @@ async function apiFetch(path, options) {
   return { status: res.status, ok: res.ok, json };
 }
 
+// Shared result handling for every network attempt below (JSON POSTs and
+// the two photo requests alike): classifies success/transient/permanent
+// and records the matching status transition, so each call site only
+// needs to react to the returned { done, success, data }.
+async function recordAttemptResult(item, result, networkErrMessage) {
+  if (networkErrMessage) {
+    // Offline / DNS / connection reset -- always transient.
+    await updateSyncItem(item.id, {
+      status: "failed",
+      retryCount: item.retryCount + 1,
+      lastError: "network_error: " + networkErrMessage
+    });
+    return { done: false, success: false };
+  }
+  if (result.ok && result.json && result.json.success) {
+    return { done: true, success: true, data: result.json.data };
+  }
+  const errCode = (result.json && result.json.error) || `http_${result.status}`;
+  if (SYNC_PERMANENT_STATUS.has(result.status)) {
+    // Won't self-heal by retrying the same payload -- stop auto-retrying,
+    // but keep the entry (and the already-safe local record) for
+    // visibility/manual follow-up rather than discarding anything.
+    await updateSyncItem(item.id, { status: "failed", lastError: errCode, retryCount: item.retryCount });
+    return { done: true, success: false };
+  }
+  // 401/403 (unexpected here on same-origin) / 5xx -- transient.
+  await updateSyncItem(item.id, { status: "failed", retryCount: item.retryCount + 1, lastError: errCode });
+  return { done: false, success: false };
+}
+
 // Returns { done: true } on success/permanent-give-up (item is now
 // "synced" or "failed"), or { done: false } if it's not this item's turn
 // yet (dependency not synced, or still within its backoff window) --
@@ -76,6 +106,8 @@ async function processSyncItem(item) {
     const readyAt = item.updatedAt + syncBackoffMs(item.retryCount - 1);
     if (Date.now() < readyAt) return { done: false };
   }
+
+  if (item.entityType === "photo") return processPhotoItem(item);
 
   let depType = null, depId = null;
   if (item.entityType === "visit" && item.payload.schoolId) {
@@ -98,7 +130,7 @@ async function processSyncItem(item) {
   // "pending"/"failed".
   await updateSyncItem(item.id, { status: "syncing" });
 
-  let result;
+  let result, networkErrMessage;
   try {
     result = await apiFetch(endpoint, {
       method: "POST",
@@ -106,40 +138,122 @@ async function processSyncItem(item) {
       body: JSON.stringify(item.payload)
     });
   } catch (networkErr) {
-    // Offline / DNS / connection reset -- always transient.
-    await updateSyncItem(item.id, {
-      status: "failed",
-      retryCount: item.retryCount + 1,
-      lastError: "network_error: " + networkErr.message
-    });
-    return { done: false };
+    networkErrMessage = networkErr.message;
   }
 
-  if (result.ok && result.json && result.json.success) {
-    await updateSyncItem(item.id, {
-      status: "synced",
-      cloudId: result.json.data.id,
-      syncedAt: Date.now(),
-      lastError: null
-    });
+  const outcome = await recordAttemptResult(item, result, networkErrMessage);
+  if (outcome.success) {
+    await updateSyncItem(item.id, { status: "synced", cloudId: outcome.data.id, syncedAt: Date.now(), lastError: null });
+  }
+  return { done: outcome.done };
+}
+
+// Photos need two requests (R2 upload, then the D1 photo_refs confirm --
+// see worker.js), so they don't fit the single-POST shape above. The
+// owner observation must already be synced (D1 needs it to exist before
+// /confirm will accept a reference to it) -- same dependency pattern as
+// observation -> visit.
+async function processPhotoItem(item) {
+  const { photoId, ownerType, ownerId, photoType, contentType, blob } = item.payload;
+
+  if (!(await dependencySynced("observation", ownerId))) {
+    return { done: false }; // owning observation hasn't synced yet
+  }
+  if (!(blob instanceof Blob) || blob.size === 0) {
+    // Nothing to retry into existence -- permanent.
+    await updateSyncItem(item.id, { status: "failed", lastError: "missing_blob", retryCount: item.retryCount });
     return { done: true };
   }
 
-  const errCode = (result.json && result.json.error) || `http_${result.status}`;
-  if (SYNC_PERMANENT_STATUS.has(result.status)) {
-    // Won't self-heal by retrying the same payload -- stop auto-retrying,
-    // but keep the entry (and the already-safe local record) for
-    // visibility/manual follow-up rather than discarding anything.
-    await updateSyncItem(item.id, { status: "failed", lastError: errCode, retryCount: item.retryCount });
-    return { done: true };
+  await updateSyncItem(item.id, { status: "syncing" });
+
+  const qs = new URLSearchParams({ ownerType, ownerId, photoType, photoId });
+  let uploadResult, uploadErrMessage;
+  try {
+    const res = await fetch(`/api/photos/upload?${qs.toString()}`, {
+      method: "POST",
+      headers: { "Content-Type": contentType || "application/octet-stream" },
+      body: blob
+    });
+    let json = null;
+    try { json = await res.json(); } catch (e) { /* non-JSON */ }
+    uploadResult = { status: res.status, ok: res.ok, json };
+  } catch (networkErr) {
+    uploadErrMessage = networkErr.message;
   }
-  // 401/403 (unexpected here on same-origin) / 5xx -- transient.
-  await updateSyncItem(item.id, {
-    status: "failed",
-    retryCount: item.retryCount + 1,
-    lastError: errCode
-  });
-  return { done: false };
+
+  const uploadOutcome = await recordAttemptResult(item, uploadResult, uploadErrMessage);
+  if (!uploadOutcome.success) return { done: uploadOutcome.done };
+
+  // Upload succeeded (R2 object confirmed to exist -- see worker.js) --
+  // now create the D1 reference. Uses the *server's* metadata (r2Key,
+  // checksum, exact size) rather than trusting the client's own copy,
+  // matching the same two-phase contract handlePhotoUpload/Confirm were
+  // built for. photoId is the same stable client id either way, so a
+  // retry from here re-uploads the identical bytes to the identical key
+  // (R2 put() on an unchanged key/content is a safe no-op) rather than
+  // creating a second object.
+  const u = uploadOutcome.data;
+  let confirmResult, confirmErrMessage;
+  try {
+    confirmResult = await apiFetch("/api/photos/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        photoId: u.photoId, r2Key: u.r2Key, ownerType: u.ownerType, ownerId: u.ownerId,
+        photoType: u.photoType, contentType: u.contentType, size: u.size,
+        checksum: u.checksum, uploadedAt: u.uploadedAt
+      })
+    });
+  } catch (networkErr) {
+    confirmErrMessage = networkErr.message;
+  }
+
+  const confirmOutcome = await recordAttemptResult(item, confirmResult, confirmErrMessage);
+  if (confirmOutcome.success) {
+    await updateSyncItem(item.id, { status: "synced", cloudId: confirmOutcome.data.id, syncedAt: Date.now(), lastError: null });
+  }
+  return { done: confirmOutcome.done };
+}
+
+// Enqueues every photo on an observation that isn't already tracked
+// (queued or synced) -- safe to call on every save of that observation,
+// new or edited, so a photo added later is still picked up. The photo's
+// own Blob travels inside payload -- storage.js's existing Blob<->
+// ArrayBuffer handling (the WebKit-safety conversion already used for
+// every other store) applies here too, so it survives an app restart
+// exactly like any other photo already does.
+async function enqueuePhotosForObservation(observationId, photos) {
+  if (!Array.isArray(photos) || photos.length === 0) return;
+  let already;
+  try {
+    already = new Set((await getAllSyncItems()).filter((it) => it.entityType === "photo").map((it) => it.localRefId));
+  } catch (err) {
+    console.warn("Failed to read sync queue for photo dedup (local save unaffected):", err);
+    return;
+  }
+  for (const photo of photos) {
+    if (!photo || !photo.id || already.has(photo.id)) continue;
+    try {
+      await enqueueSyncItem({
+        entityType: "photo",
+        op: "create",
+        localRefId: photo.id,
+        payload: {
+          photoId: photo.id,
+          ownerType: "observation",
+          ownerId: observationId,
+          photoType: "original",
+          contentType: (photo.blob && photo.blob.type) || "image/jpeg",
+          blob: photo.blob
+        }
+      });
+    } catch (err) {
+      console.warn("Failed to enqueue photo sync (local save unaffected):", err);
+    }
+  }
+  updateSyncIndicator();
+  scheduleSyncSoon();
 }
 
 async function flushSyncQueue() {
