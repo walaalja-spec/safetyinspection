@@ -1,0 +1,137 @@
+name: Cloudflare Verify
+
+# Read-only verification only. Manual trigger only — never runs on push,
+# pull_request, or a schedule. This workflow performs NO writes: no D1
+# migrations, no D1 execute, no R2 object/bucket operations, no
+# `wrangler deploy`. It only checks that the Cloudflare resources named
+# in wrangler.toml actually exist and match.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_D1_NAME: school-inspection-db
+  EXPECTED_D1_ID: 8a82e00d-06dc-4a66-bf80-7e5b143338a7
+  EXPECTED_R2_BUCKET: school-inspection-photos
+  WRANGLER_VERSION: "4"
+
+jobs:
+  verify:
+    name: Verify Cloudflare resources (read-only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # No Cloudflare credentials needed for this step — just compares the
+      # checked-out wrangler.toml against the resource names/ID this
+      # workflow expects, so config drift is caught before any API call.
+      - name: Verify wrangler.toml matches expected resources
+        run: |
+          set -euo pipefail
+          echo "Checking wrangler.toml against expected D1/R2 identifiers..."
+
+          actual_d1_name=$(grep -E '^\s*database_name\s*=' wrangler.toml | head -n1 | sed -E 's/.*=\s*"([^"]*)".*/\1/')
+          actual_d1_id=$(grep -E '^\s*database_id\s*=' wrangler.toml | head -n1 | sed -E 's/.*=\s*"([^"]*)".*/\1/')
+          actual_r2_bucket=$(grep -E '^\s*bucket_name\s*=' wrangler.toml | head -n1 | sed -E 's/.*=\s*"([^"]*)".*/\1/')
+
+          fail=0
+          if [ "$actual_d1_name" != "$EXPECTED_D1_NAME" ]; then
+            echo "::error::wrangler.toml database_name is '$actual_d1_name', expected '$EXPECTED_D1_NAME'"
+            fail=1
+          fi
+          if [ "$actual_d1_id" != "$EXPECTED_D1_ID" ]; then
+            echo "::error::wrangler.toml database_id is '$actual_d1_id', expected '$EXPECTED_D1_ID'"
+            fail=1
+          fi
+          if [ "$actual_r2_bucket" != "$EXPECTED_R2_BUCKET" ]; then
+            echo "::error::wrangler.toml bucket_name is '$actual_r2_bucket', expected '$EXPECTED_R2_BUCKET'"
+            fail=1
+          fi
+
+          if [ "$fail" -eq 1 ]; then
+            echo "wrangler.toml does NOT match the expected resources."
+            exit 1
+          fi
+          echo "wrangler.toml matches the expected resources."
+
+      # `wrangler whoami` is read-only (identity check only). Output is
+      # redirected to a file and only ever grepped, never printed, so an
+      # account id/email in its output can't end up in the job log.
+      - name: Verify Cloudflare authentication
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if npx --yes wrangler@${WRANGLER_VERSION} whoami > whoami_output.txt 2>&1; then
+            if grep -qi "not authenticated" whoami_output.txt; then
+              echo "::error::Cloudflare authentication failed (not authenticated)."
+              exit 1
+            fi
+            echo "Cloudflare authentication succeeded."
+          else
+            echo "::error::Cloudflare authentication failed (wrangler whoami exited non-zero)."
+            exit 1
+          fi
+
+      # `wrangler d1 list` is read-only. Result is parsed with jq, never
+      # printed in full, to avoid leaking anything about the account.
+      - name: Verify D1 database exists and ID matches
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} d1 list --json > d1_list.json
+
+          found_id=$(jq -r --arg name "$EXPECTED_D1_NAME" '.[] | select(.name == $name) | .uuid' d1_list.json | head -n1)
+
+          if [ -z "${found_id:-}" ]; then
+            echo "::error::No D1 database named '$EXPECTED_D1_NAME' found in this Cloudflare account."
+            exit 1
+          fi
+
+          if [ "$found_id" != "$EXPECTED_D1_ID" ]; then
+            echo "::error::D1 database '$EXPECTED_D1_NAME' exists but its ID does not match the expected '$EXPECTED_D1_ID'."
+            exit 1
+          fi
+
+          echo "D1 database '$EXPECTED_D1_NAME' exists and its ID matches."
+
+      # `wrangler r2 bucket list` is read-only. Output is only grepped for
+      # an exact name match, never printed in full.
+      - name: Verify R2 bucket exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@${WRANGLER_VERSION} r2 bucket list > r2_list.txt
+
+          if ! grep -qE "(^|[^A-Za-z0-9_-])${EXPECTED_R2_BUCKET}([^A-Za-z0-9_-]|$)" r2_list.txt; then
+            echo "::error::No R2 bucket named '$EXPECTED_R2_BUCKET' found in this Cloudflare account."
+            exit 1
+          fi
+
+          echo "R2 bucket '$EXPECTED_R2_BUCKET' exists."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Cloudflare Verification (Read-Only)"
+            echo ""
+            echo "- Expected D1 database: \`$EXPECTED_D1_NAME\` (\`$EXPECTED_D1_ID\`)"
+            echo "- Expected R2 bucket: \`$EXPECTED_R2_BUCKET\`"
+            echo ""
+            echo "See the step results above for pass/fail on each check."
+            echo "This workflow performs no writes, migrations, or deployments."
+          } >> "$GITHUB_STEP_SUMMARY"
