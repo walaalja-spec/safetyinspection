@@ -334,6 +334,29 @@ html[dir="ltr"] select { background-position: right 14px center; }
 .obs-thumb-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 8px; }
 .obs-thumb-grid:has(.obs-thumb:only-child) { grid-template-columns: 1fr; }
 
+/* ---------- Follow-up (متابعة الإصلاح) — optional, per observation ---------- */
+.followup-section { margin-top: 10px; }
+.followup-details {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
+}
+.followup-summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-weight: 800; font-size: 0.94rem; color: var(--ink); list-style: none;
+}
+.followup-summary::-webkit-details-marker { display: none; }
+.followup-body { margin-top: 10px; }
+.followup-photos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 8px; }
+.followup-photos:has(.followup-photo-col:only-child) { grid-template-columns: 1fr; }
+.followup-photo-col { display: flex; flex-direction: column; gap: 4px; }
+.followup-photo-label { font-size: var(--fs-xs); font-weight: 800; color: var(--ink-2); }
+.followup-verification-date { font-size: var(--fs-sm); color: var(--ink-2); margin: 0 0 8px 0; }
+.followup-note {
+  width: 100%; min-height: 60px; padding: 10px; border: 1px solid var(--line);
+  border-radius: var(--r-sm); font-family: inherit; font-size: var(--fs-sm); color: var(--ink);
+  resize: vertical; box-sizing: border-box;
+}
+.followup-verify-actions { margin-top: 4px; margin-bottom: 10px; }
+
 /* ---------- Status / progress ---------- */
 .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 800; }
 .status-completed { background: #e2f5e8; color: #187a3d; }

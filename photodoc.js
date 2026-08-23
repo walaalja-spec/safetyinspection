@@ -87,8 +87,24 @@ function createDocumentedPhoto(sourceBlob, lines, isRtl) {
       const barHeight = lines.length * (fontSize + lineGap) + paddingY * 2 - lineGap;
       const barY = size - barHeight;
 
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(0, barY, size, barHeight);
+      // A soft gradient fade (transparent → dark) instead of a flat,
+      // hard-edged black bar — keeps the info readable without boxing
+      // the bottom of the photo in solid black.
+      const fadeHeight = Math.round(fontSize * 1.4);
+      const gradientTop = Math.max(0, barY - fadeHeight);
+      const gradient = ctx.createLinearGradient(0, gradientTop, 0, size);
+      gradient.addColorStop(0, "rgba(0,0,0,0)");
+      gradient.addColorStop(0.35, "rgba(0,0,0,0.3)");
+      gradient.addColorStop(1, "rgba(0,0,0,0.72)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, gradientTop, size, size - gradientTop);
+
+      // A dark glow behind the glyphs guarantees legibility even where
+      // the gradient is nearly transparent (the top-most line).
+      ctx.shadowColor = "rgba(0,0,0,0.9)";
+      ctx.shadowBlur = Math.round(fontSize * 0.3);
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 1;
 
       ctx.fillStyle = "#ffffff";
       ctx.direction = isRtl ? "rtl" : "ltr";
@@ -100,6 +116,8 @@ function createDocumentedPhoto(sourceBlob, lines, isRtl) {
         ctx.fillText(line, isRtl ? size - paddingX : paddingX, ty);
         ty += fontSize + lineGap;
       });
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
 
       canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/jpeg", 0.95);
     };

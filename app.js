@@ -68,6 +68,8 @@ let stagedAudioBlob = null;
 let pendingTranscript = "";
 let isRecording = false;
 let editingAIFields = {}; // preserves previously-approved AI fields when re-saving without re-running AI
+let followUpCaptureIndex = null; // observation index currently capturing an after-fix photo
+let followUpOpenIndices = new Set(); // which observations' follow-up panels are expanded (survives re-renders)
 const recorder = new VoiceRecorder();
 
 // ---------- Translations ----------
@@ -291,7 +293,20 @@ const translations = {
     btnAnalyzePending: "🔄 تحليل كل الملاحظات المعلقة",
     offlineAnalyzeSaved: "📴 لا يوجد اتصال — تم حفظ الملاحظة وستُحلَّل لاحقًا.",
     analyzingPendingProgress: (i, n) => `⏳ جاري التحليل (${i}/${n})...`,
-    analyzingPendingDone: (ok, total) => `تم تحليل ${ok} من ${total} ملاحظة معلّقة.`
+    analyzingPendingDone: (ok, total) => `تم تحليل ${ok} من ${total} ملاحظة معلّقة.`,
+    followUpStart: "🔄 متابعة الإصلاح",
+    followUpHeading: "متابعة الإصلاح",
+    followUpStatusInProgress: "قيد المتابعة",
+    followUpStatusFixed: "تم الإصلاح",
+    followUpStatusNotFixed: "لم يتم الإصلاح",
+    followUpBefore: "قبل",
+    followUpAfter: "بعد",
+    followUpAddAfterPhoto: "📷 إضافة صورة بعد الإصلاح",
+    followUpMarkFixed: "✅ تم الإصلاح",
+    followUpMarkNotFixed: "↩️ لم يتم الإصلاح",
+    followUpVerificationDateLabel: "تاريخ التحقق",
+    followUpNotePlaceholder: "ملاحظة التحقق (اختياري)",
+    followUpPhotoSaved: "تم حفظ صورة ما بعد الإصلاح."
   },
   en: {
     appTitle: "WJ Safety",
@@ -512,7 +527,20 @@ const translations = {
     btnAnalyzePending: "🔄 Analyze All Pending Notes",
     offlineAnalyzeSaved: "📴 No connection — the note was saved and will be analyzed later.",
     analyzingPendingProgress: (i, n) => `⏳ Analyzing (${i}/${n})...`,
-    analyzingPendingDone: (ok, total) => `Analyzed ${ok} of ${total} pending notes.`
+    analyzingPendingDone: (ok, total) => `Analyzed ${ok} of ${total} pending notes.`,
+    followUpStart: "🔄 Track Fix",
+    followUpHeading: "Follow-up",
+    followUpStatusInProgress: "In progress",
+    followUpStatusFixed: "Fixed",
+    followUpStatusNotFixed: "Not fixed",
+    followUpBefore: "Before",
+    followUpAfter: "After",
+    followUpAddAfterPhoto: "📷 Add after-fix photo",
+    followUpMarkFixed: "✅ Fixed",
+    followUpMarkNotFixed: "↩️ Not fixed",
+    followUpVerificationDateLabel: "Verification date",
+    followUpNotePlaceholder: "Verification note (optional)",
+    followUpPhotoSaved: "After-fix photo saved."
   }
 };
 
@@ -1198,6 +1226,161 @@ function thumbUrl(blob) {
   return blob ? URL.createObjectURL(blob) : null;
 }
 
+// ---------- Follow-up (متابعة الإصلاح) — fully optional per observation.
+// Lives entirely on the report-card view (not the add/edit observation
+// form), reading/writing activeReport.observations[i].followUp directly
+// and persisting immediately — observations that never enable it keep
+// `followUp` absent, which every reader below treats as "no follow-up".
+function defaultFollowUp() {
+  return { enabled: true, status: "in_progress", afterPhoto: null, verificationDate: null, verificationNote: "" };
+}
+
+function followUpStatusLabel(status) {
+  if (status === "fixed") return t("followUpStatusFixed");
+  if (status === "not_fixed") return t("followUpStatusNotFixed");
+  return t("followUpStatusInProgress");
+}
+
+function followUpStatusClass(status) {
+  if (status === "fixed") return "status-completed";
+  if (status === "not_fixed") return "status-incomplete";
+  return "status-progress";
+}
+
+function formatDateSlash(isoDateStr) {
+  if (!isoDateStr) return "";
+  const [y, m, d] = isoDateStr.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function todayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function persistFollowUpChange() {
+  await saveReport(activeReport);
+  await renderReportScreen();
+}
+
+function renderFollowUpSection(obs, i) {
+  const fu = obs.followUp;
+  if (!fu || !fu.enabled) {
+    return `<div class="followup-section">
+      <button type="button" class="btn btn-text btn-inline followup-start" data-i="${i}">${t("followUpStart")}</button>
+    </div>`;
+  }
+
+  const beforePhoto = obsPhotos(obs)[0];
+  const beforeUrl = beforePhoto ? thumbUrl(beforePhoto.blob) : "";
+  const afterUrl = fu.afterPhoto ? thumbUrl(fu.afterPhoto.blob) : "";
+  const statusBadge = `<span class="status-badge ${followUpStatusClass(fu.status)}">${followUpStatusLabel(fu.status)}</span>`;
+
+  const photosHtml = (beforeUrl || afterUrl)
+    ? `<div class="followup-photos">
+         ${beforeUrl ? `<div class="followup-photo-col"><span class="followup-photo-label">${t("followUpBefore")}</span><img src="${beforeUrl}" class="obs-thumb" alt=""></div>` : ""}
+         ${afterUrl ? `<div class="followup-photo-col"><span class="followup-photo-label">${t("followUpAfter")}</span><img src="${afterUrl}" class="obs-thumb" alt=""></div>` : ""}
+       </div>`
+    : "";
+
+  const addAfterBtn = !afterUrl
+    ? `<button type="button" class="btn btn-secondary followup-add-after" data-i="${i}">${t("followUpAddAfterPhoto")}</button>`
+    : "";
+
+  const verifyButtons = afterUrl
+    ? `<div class="card-actions followup-verify-actions">
+         <button type="button" class="btn-primary followup-mark-fixed" data-i="${i}">${t("followUpMarkFixed")}</button>
+         <button type="button" class="btn-secondary followup-mark-notfixed" data-i="${i}">${t("followUpMarkNotFixed")}</button>
+       </div>`
+    : "";
+
+  const verificationDateHtml = fu.verificationDate
+    ? `<p class="followup-verification-date">${t("followUpVerificationDateLabel")}: ${formatDateSlash(fu.verificationDate)}</p>`
+    : "";
+
+  return `
+    <details class="followup-details" data-i="${i}" ${followUpOpenIndices.has(i) ? "open" : ""}>
+      <summary class="followup-summary">🔄 ${t("followUpHeading")} ${statusBadge}</summary>
+      <div class="followup-body">
+        ${photosHtml}
+        ${addAfterBtn}
+        ${verifyButtons}
+        ${verificationDateHtml}
+        <textarea class="followup-note" data-i="${i}" placeholder="${t("followUpNotePlaceholder")}">${escapeHtml(fu.verificationNote || "")}</textarea>
+      </div>
+    </details>
+  `;
+}
+
+function wireFollowUpEvents(listEl) {
+  listEl.querySelectorAll(".followup-start").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const i = parseInt(btn.dataset.i, 10);
+      activeReport.observations[i].followUp = defaultFollowUp();
+      followUpOpenIndices.add(i);
+      await persistFollowUpChange();
+    });
+  });
+  // <details> open/closed state is re-derived from followUpOpenIndices on
+  // every render (the card list is rebuilt via innerHTML), so keep that
+  // set in sync with the user's own manual expand/collapse clicks.
+  listEl.querySelectorAll(".followup-details").forEach((det) => {
+    det.addEventListener("toggle", () => {
+      const i = parseInt(det.dataset.i, 10);
+      if (det.open) followUpOpenIndices.add(i);
+      else followUpOpenIndices.delete(i);
+    });
+  });
+  listEl.querySelectorAll(".followup-add-after").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      followUpCaptureIndex = parseInt(btn.dataset.i, 10);
+      document.getElementById("followUpPhotoInput").click();
+    });
+  });
+  listEl.querySelectorAll(".followup-mark-fixed").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const i = parseInt(btn.dataset.i, 10);
+      activeReport.observations[i].followUp.status = "fixed";
+      activeReport.observations[i].followUp.verificationDate = todayIso();
+      await persistFollowUpChange();
+    });
+  });
+  listEl.querySelectorAll(".followup-mark-notfixed").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const i = parseInt(btn.dataset.i, 10);
+      activeReport.observations[i].followUp.status = "not_fixed";
+      activeReport.observations[i].followUp.verificationDate = todayIso();
+      await persistFollowUpChange();
+    });
+  });
+  // Saved on blur (not re-rendering the list) so typing a note doesn't
+  // collapse the <details> panel or steal focus mid-sentence.
+  listEl.querySelectorAll(".followup-note").forEach((textarea) => {
+    textarea.addEventListener("change", async () => {
+      const i = parseInt(textarea.dataset.i, 10);
+      activeReport.observations[i].followUp.verificationNote = textarea.value;
+      await saveReport(activeReport);
+    });
+  });
+}
+
+document.getElementById("followUpPhotoInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || followUpCaptureIndex === null) return;
+  try {
+    const blob = await compressImage(file);
+    activeReport.observations[followUpCaptureIndex].followUp.afterPhoto = { blob, takenAt: Date.now() };
+    await saveReport(activeReport);
+    showToast(t("followUpPhotoSaved"), "success");
+    await renderReportScreen();
+  } catch (err) {
+    console.error(err);
+    showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.", "error");
+  }
+  followUpCaptureIndex = null;
+});
+
 async function renderReportScreen() {
   document.getElementById("reportSummaryTitle").textContent = activeReport.title;
   document.getElementById("reportSummaryMeta").textContent = `${activeReport.location} — ${activeReport.date}`;
@@ -1243,6 +1426,7 @@ async function renderReportScreen() {
           <button class="card-open obs-edit" data-i="${i}">${t("editBtn")}</button>
           <button class="card-delete obs-delete" data-i="${i}">${t("deleteBtn")}</button>
         </div>
+        ${renderFollowUpSection(obs, i)}
       `;
       listEl.appendChild(card);
     });
@@ -1260,6 +1444,7 @@ async function renderReportScreen() {
         }
       });
     });
+    wireFollowUpEvents(listEl);
   }
 }
 
@@ -1627,6 +1812,7 @@ async function saveCurrentObservation(extraFields) {
   }
 
   const manualCategory = document.getElementById("observationCategorySelect").value;
+  const existingObs = editingIndex !== null ? activeReport.observations[editingIndex] : null;
 
   const obs = {
     text,
@@ -1635,6 +1821,10 @@ async function saveCurrentObservation(extraFields) {
     audioBlob: stagedAudioBlob || null,
     ...editingAIFields,
     category: manualCategory || editingAIFields.category || undefined,
+    // Follow-up isn't edited from this form (it lives on the report
+    // card) — carry it over untouched so re-saving an edited
+    // observation never drops its follow-up data.
+    ...(existingObs && existingObs.followUp ? { followUp: existingObs.followUp } : {}),
     ...(extraFields || {})
   };
 

@@ -53,6 +53,15 @@ function sanitizeFileName(str) {
   return (str || "").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, "_").trim() || "Report";
 }
 
+// Same illegal-character stripping as sanitizeFileName, but keeps spaces
+// as-is (per the school-visit PDF filename requirement) instead of
+// collapsing them to underscores. Kept separate from sanitizeFileName
+// since that one is also used for other filenames (photo shares, PPTX
+// exports) that must keep their existing underscore behavior.
+function sanitizeFileNameKeepSpaces(str) {
+  return (str || "").replace(/[\\/:*?"<>|]/g, "").trim();
+}
+
 async function ensureFontsLoaded() {
   try {
     await Promise.all([
@@ -281,8 +290,144 @@ function measureObservationHeight(ctx, obs, width) {
   const lines = wrapText(ctx, obs.text || "", width - TEXT_PADDING * 2 - 14);
   const naturalTextH = lines.length * TEXT_LINE_HEIGHT + TEXT_PADDING * 2;
 
-  const naturalTotal = BADGE_ROW_H + photoBlockH + spotBlockH + naturalTextH;
+  const followUpH = computeFollowUpHeight(ctx, obs, width);
+
+  const naturalTotal = BADGE_ROW_H + photoBlockH + spotBlockH + naturalTextH + followUpH;
   return { height: Math.min(naturalTotal, MAX_ROW_HEIGHT), lineCount: lines.length };
+}
+
+// ---------- Follow-up (متابعة الإصلاح) ----------
+// Entirely optional: obs.followUp is only present on observations where
+// the user explicitly turned this on, so this whole block is skipped
+// (zero extra height, zero extra drawing) for every other observation —
+// the existing report layout above is untouched either way.
+const FOLLOWUP_THUMB = 100;
+
+function followUpStatusLabelPdf(status, lang) {
+  const ar = lang === "ar";
+  if (status === "fixed") return ar ? "تم الإصلاح" : "Fixed";
+  if (status === "not_fixed") return ar ? "لم يتم الإصلاح" : "Not fixed";
+  return ar ? "قيد المتابعة" : "In progress";
+}
+
+// Mirrors the .status-badge color variants in style.css for visual
+// consistency between the in-app card and the PDF.
+function followUpStatusColorsPdf(status) {
+  if (status === "fixed") return { bg: "#e2f5e8", fg: "#187a3d" };
+  if (status === "not_fixed") return { bg: "#fdf0da", fg: "#b6790a" };
+  return { bg: "#e6eff9", fg: "#2566a8" };
+}
+
+function formatDateSlashPdf(isoDateStr) {
+  if (!isoDateStr) return "";
+  const [y, m, d] = isoDateStr.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function computeFollowUpHeight(ctx, obs, width) {
+  const fu = obs.followUp;
+  if (!fu || !fu.enabled) return 0;
+  let h = 14 + 30; // top separator/padding + heading row
+  if (fu.verificationDate) h += 24;
+  if (fu.verificationNote) {
+    ctx.font = "15px Geeza Pro, Cairo, Arial, sans-serif";
+    const wrapped = wrapText(ctx, fu.verificationNote, width - TEXT_PADDING * 2);
+    h += Math.min(wrapped.length, 3) * 20 + 6;
+  }
+  h += FOLLOWUP_THUMB + 22;
+  return h;
+}
+
+async function drawFollowUpBlock(ctx, obs, x, y, w, isRtl, lang) {
+  const fu = obs.followUp;
+  const rightX = isRtl ? x + w : x;
+  ctx.textAlign = isRtl ? "right" : "left";
+
+  ctx.strokeStyle = PDF_COLORS.border;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w, y);
+  ctx.stroke();
+  let cursorY = y + 14;
+
+  ctx.direction = isRtl ? "rtl" : "ltr";
+  ctx.fillStyle = PDF_COLORS.text;
+  ctx.font = "700 17px Geeza Pro, Cairo, Arial, sans-serif";
+  ctx.fillText(lang === "ar" ? "🔄 متابعة الإصلاح" : "🔄 Follow-up", rightX, cursorY + 15);
+
+  const colors = followUpStatusColorsPdf(fu.status);
+  const label = followUpStatusLabelPdf(fu.status, lang);
+  ctx.font = "700 14px Geeza Pro, Cairo, Arial, sans-serif";
+  const padX = 10;
+  const pillW = ctx.measureText(label).width + padX * 2;
+  const pillH = 24;
+  const pillX = isRtl ? x : x + w - pillW;
+  const pillY = cursorY - 2;
+  ctx.fillStyle = colors.bg;
+  roundRectPath(ctx, pillX, pillY, pillW, pillH, pillH / 2);
+  ctx.fill();
+  ctx.fillStyle = colors.fg;
+  ctx.textAlign = "center";
+  ctx.fillText(label, pillX + pillW / 2, pillY + pillH / 2 + 5);
+  ctx.textAlign = isRtl ? "right" : "left";
+  cursorY += 30;
+
+  if (fu.verificationDate) {
+    ctx.font = "15px Geeza Pro, Cairo, Arial, sans-serif";
+    ctx.fillStyle = PDF_COLORS.muted;
+    const dateLabel = (lang === "ar" ? "تاريخ التحقق: " : "Verification date: ") + formatDateSlashPdf(fu.verificationDate);
+    ctx.fillText(dateLabel, rightX, cursorY + 12);
+    cursorY += 24;
+  }
+
+  if (fu.verificationNote) {
+    ctx.font = "15px Geeza Pro, Cairo, Arial, sans-serif";
+    ctx.fillStyle = PDF_COLORS.text;
+    const prefix = lang === "ar" ? "ملاحظة التحقق: " : "Verification note: ";
+    const wrapped = truncateLines(wrapText(ctx, prefix + fu.verificationNote, w - TEXT_PADDING * 2), 3);
+    wrapped.forEach((line) => {
+      ctx.fillText(line, rightX, cursorY + 12);
+      cursorY += 20;
+    });
+    cursorY += 6;
+  }
+
+  const beforePhoto = obsPhotos(obs)[0];
+  const size = FOLLOWUP_THUMB;
+  const gap = 10;
+  const hasAfter = !!(fu.afterPhoto && fu.afterPhoto.blob);
+  const totalW = (beforePhoto ? size : 0) + (hasAfter ? (beforePhoto ? size + gap : size) : 0);
+  const startX = isRtl ? x + w - totalW : x;
+
+  async function drawLabeledThumb(cellX, blob, labelText) {
+    try {
+      const img = await loadImageFromBlob(blob);
+      drawImageCover(ctx, img, cellX, cursorY, size, size, 6);
+    } catch (e) {
+      console.warn("Could not draw follow-up photo in PDF:", e);
+    }
+    ctx.font = "600 13px Geeza Pro, Cairo, Arial, sans-serif";
+    ctx.fillStyle = PDF_COLORS.muted;
+    ctx.textAlign = "center";
+    ctx.fillText(labelText, cellX + size / 2, cursorY + size + 16);
+  }
+
+  const beforeLabel = lang === "ar" ? "قبل" : "Before";
+  const afterLabel = lang === "ar" ? "بعد" : "After";
+  // In RTL, reading order runs right-to-left, so "Before" (read first)
+  // goes on the right-hand slot and "After" on the left-hand slot.
+  const slots = [];
+  if (isRtl) {
+    if (hasAfter) slots.push({ x: startX, blob: fu.afterPhoto.blob, label: afterLabel });
+    if (beforePhoto) slots.push({ x: startX + (hasAfter ? size + gap : 0), blob: beforePhoto.blob, label: beforeLabel });
+  } else {
+    if (beforePhoto) slots.push({ x: startX, blob: beforePhoto.blob, label: beforeLabel });
+    if (hasAfter) slots.push({ x: startX + (beforePhoto ? size + gap : 0), blob: fu.afterPhoto.blob, label: afterLabel });
+  }
+  for (const s of slots) await drawLabeledThumb(s.x, s.blob, s.label);
+
+  ctx.textAlign = isRtl ? "right" : "left";
 }
 
 async function drawObservationSlot(ctx, report, obs, obsNumber, x, y, w, h, isRtl, lang) {
@@ -367,7 +512,8 @@ async function drawObservationSlot(ctx, report, obs, obsNumber, x, y, w, h, isRt
     cursorY += 26;
   }
 
-  const textCardH = Math.max(44, y + h - cursorY);
+  const followUpH = computeFollowUpHeight(ctx, obs, w);
+  const textCardH = Math.max(44, y + h - cursorY - followUpH);
   const cardRadius = 8;
 
   ctx.fillStyle = PDF_COLORS.bgLight;
@@ -401,6 +547,10 @@ async function drawObservationSlot(ctx, report, obs, obsNumber, x, y, w, h, isRt
     ctx.fillText(line, isRtl ? x + w - textStartPad : x + textStartPad, textY);
     textY += TEXT_LINE_HEIGHT;
   });
+
+  if (followUpH > 0) {
+    await drawFollowUpBlock(ctx, obs, x, cursorY + textCardH, w, isRtl, lang);
+  }
 }
 
 async function generatePdf(report) {
@@ -467,7 +617,8 @@ async function generatePdf(report) {
 
   finishPage();
 
-  const fileName = `Safety_Report_${sanitizeFileName(report.location)}_${report.date}.pdf`;
+  const schoolName = sanitizeFileNameKeepSpaces(report.location) || sanitizeFileName(report.location);
+  const fileName = `تقرير زيارة مدرسة ${schoolName}.pdf`;
   const blob = pdf.output("blob");
   return { blob, fileName };
 }

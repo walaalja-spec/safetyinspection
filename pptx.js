@@ -182,8 +182,22 @@ function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000, lines = [
         const barHeight = lines.length * (fontSize + lineGap) + paddingY * 2 - lineGap;
         const barY = targetHeight - barHeight;
 
-        ctx.fillStyle = "rgba(0,0,0,0.55)";
-        ctx.fillRect(0, barY, targetWidth, barHeight);
+        // Same soft gradient fade used for the in-app documented photos
+        // (photodoc.js) instead of a flat black bar, for a consistent
+        // look across PDF/app/PPTX exports.
+        const fadeHeight = Math.round(fontSize * 1.4);
+        const gradientTop = Math.max(0, barY - fadeHeight);
+        const gradient = ctx.createLinearGradient(0, gradientTop, 0, targetHeight);
+        gradient.addColorStop(0, "rgba(0,0,0,0)");
+        gradient.addColorStop(0.35, "rgba(0,0,0,0.3)");
+        gradient.addColorStop(1, "rgba(0,0,0,0.72)");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, gradientTop, targetWidth, targetHeight - gradientTop);
+
+        ctx.shadowColor = "rgba(0,0,0,0.9)";
+        ctx.shadowBlur = Math.round(fontSize * 0.3);
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 1;
 
         ctx.fillStyle = "#ffffff";
         ctx.direction = isRtl ? "rtl" : "ltr";
@@ -195,6 +209,8 @@ function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000, lines = [
           ctx.fillText(line, isRtl ? targetWidth - paddingX : paddingX, ty);
           ty += fontSize + lineGap;
         });
+        ctx.shadowColor = "transparent";
+        ctx.shadowBlur = 0;
       }
 
       canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/jpeg", 0.88);
