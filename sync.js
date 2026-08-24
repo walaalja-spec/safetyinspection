@@ -292,6 +292,69 @@ async function pruneOldSyncedItems() {
   }
 }
 
+// One-time repair for a historical bug: a visit started from an
+// existing school's page (see enqueueVisitSync() in app.js) was never
+// enqueued for cloud sync at all -- only its observations and photos
+// were. Since an observation waits for its visit to sync first (see
+// processSyncItem's dependency check above), and a dependency that was
+// never enqueued in the first place never resolves, this left those
+// observations (and their photos, waiting on the observations in turn)
+// stuck at "pending" forever -- silently, since a missing dependency
+// returns without ever touching retryCount, so the "stuck" indicator
+// (retryCount >= 5) never fires either.
+//
+// Runs once at startup: finds every observation sync item whose
+// visitId has no matching visit sync item at all, looks the real report
+// (and its school, if any) up locally, and enqueues them now -- letting
+// the normal dependency-ordered sync loop take it from there exactly as
+// if they'd been enqueued correctly to begin with. A visit/report no
+// longer found locally (deleted since) is left alone; nothing here can
+// invent or duplicate data, only enqueue a sync for something that
+// genuinely still exists on this device.
+async function backfillMissingParentSyncItems() {
+  try {
+    const items = await getAllSyncItems();
+    const knownVisitIds = new Set(items.filter((i) => i.entityType === "visit").map((i) => i.localRefId));
+    const knownSchoolIds = new Set(items.filter((i) => i.entityType === "school").map((i) => i.localRefId));
+
+    const missingVisitIds = new Set();
+    for (const it of items) {
+      if (it.entityType !== "observation") continue;
+      if (it.status !== "pending" && it.status !== "failed") continue;
+      const visitId = it.payload && it.payload.visitId;
+      if (visitId && !knownVisitIds.has(visitId)) missingVisitIds.add(visitId);
+    }
+    if (missingVisitIds.size === 0) return;
+
+    const schools = await getAllMonthlySchools();
+    const schoolById = new Map(schools.map((s) => [s.id, s]));
+
+    for (const visitId of missingVisitIds) {
+      const report = await getReportById(visitId);
+      if (!report) continue; // nothing local to recover -- leave the stuck item as-is rather than guess
+
+      if (report.schoolId && !knownSchoolIds.has(report.schoolId)) {
+        const school = schoolById.get(report.schoolId);
+        if (school) {
+          await enqueueEntitySync("school", "create", school.id, { id: school.id, name: school.name });
+          knownSchoolIds.add(school.id);
+        }
+      }
+
+      await enqueueEntitySync("visit", "create", report.id, {
+        id: report.id,
+        schoolId: report.schoolId || undefined,
+        title: report.title,
+        location: report.location,
+        date: report.date
+      });
+      knownVisitIds.add(report.id);
+    }
+  } catch (err) {
+    console.warn("Backfill of missing parent sync items failed (non-critical, will retry next load):", err);
+  }
+}
+
 async function flushSyncQueue() {
   // A flush already running when this fires (e.g. an enqueue's
   // scheduleSyncSoon landing mid-pass) must not just return and drop the
@@ -358,5 +421,6 @@ if (typeof window !== "undefined") {
     updateSyncIndicator();
     flushSyncQueue();
     pruneOldSyncedItems().catch((err) => console.warn("Sync queue prune failed (non-critical):", err));
+    backfillMissingParentSyncItems().then(flushSyncQueue).catch((err) => console.warn("Sync queue backfill failed (non-critical):", err));
   });
 }

@@ -945,7 +945,16 @@ document.getElementById("addSchoolBtnHome").addEventListener("click", async () =
   const btn = document.getElementById("addSchoolBtnHome");
   btn.disabled = true;
   try {
-    await addMonthlySchool(name);
+    const school = await addMonthlySchool(name);
+    // Cloud sync only, after the local save above already succeeded --
+    // see saveCurrentObservation()'s matching comment. Missing this is
+    // exactly what left visits/observations/photos created under a
+    // school stuck "pending" forever: they wait on this school (and the
+    // visit) to sync first, and a dependency that was never enqueued at
+    // all never syncs, silently, with no error to surface.
+    if (typeof enqueueEntitySync === "function") {
+      enqueueEntitySync("school", "create", school.id, { id: school.id, name: school.name });
+    }
     input.value = "";
     await renderHome();
     await renderSchoolsHomeList();
@@ -1120,6 +1129,27 @@ async function openSchoolDetail(schoolId) {
   showScreen("screen-school-detail");
 }
 
+// Cloud sync for a visit created under an existing school -- the other
+// half of enqueueEntitySync("visit", ...) alongside the "quick visit"
+// path in the newReportForm handler below. Missing this for years is
+// exactly what left visits (and every observation/photo under them)
+// started from a school's page stuck "pending" forever: sync.js makes
+// an observation wait for its visit, and a photo wait for its
+// observation, and a dependency that was never enqueued at all never
+// syncs -- silently, with no error surfaced anywhere. See also
+// backfillMissingParentSyncItems() in sync.js, which repairs any visit
+// already stuck this way from before this fix.
+function enqueueVisitSync(report) {
+  if (typeof enqueueEntitySync !== "function") return;
+  enqueueEntitySync("visit", "create", report.id, {
+    id: report.id,
+    schoolId: report.schoolId || undefined,
+    title: report.title,
+    location: report.location,
+    date: report.date
+  });
+}
+
 async function reuseObservationForSchool(obsData) {
   if (!activeSchoolForVisits) return;
   const today = new Date().toISOString().split("T")[0];
@@ -1134,6 +1164,7 @@ async function reuseObservationForSchool(obsData) {
     createdAt: Date.now()
   };
   await saveReport(report);
+  enqueueVisitSync(report);
   activeReport = report;
   openObservationEditor(null);
   document.getElementById("observationText").value = obsData.text || "";
@@ -1159,6 +1190,7 @@ document.getElementById("startVisitBtn").addEventListener("click", async () => {
     createdAt: Date.now()
   };
   await saveReport(report);
+  enqueueVisitSync(report);
   await openReport(report.id);
 });
 
@@ -1472,9 +1504,10 @@ document.getElementById("newReportForm").addEventListener("submit", async (e) =>
   };
   await saveReport(report);
   // Cloud sync only, after the local save above already succeeded -- see
-  // saveCurrentObservation()'s matching comment. This app has no UI path
-  // linking a report to a monthly_schools entity, so schoolId is always
-  // null here (a "quick visit" in the D1 schema's own terms).
+  // saveCurrentObservation()'s matching comment. A "quick visit" created
+  // here never has a schoolId, so this is always a schoolless visit in
+  // the D1 schema's own terms -- see enqueueVisitSync() for the other
+  // creation path (starting a visit from an existing school).
   if (typeof enqueueEntitySync === "function") {
     enqueueEntitySync("visit", "create", report.id, {
       id: report.id,

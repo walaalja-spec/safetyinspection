@@ -98,7 +98,13 @@ document.getElementById("addSchoolBtn").addEventListener("click", async () => {
   const btn = document.getElementById("addSchoolBtn");
   btn.disabled = true;
   try {
-    await addMonthlySchool(name);
+    const school = await addMonthlySchool(name);
+    // See the matching addSchoolBtnHome handler in app.js for why this
+    // matters -- without it, this school (and every visit/observation/
+    // photo created under it) never reaches the cloud, silently.
+    if (typeof enqueueEntitySync === "function") {
+      enqueueEntitySync("school", "create", school.id, { id: school.id, name: school.name });
+    }
     input.value = "";
     monthlySchools = await getAllMonthlySchools();
     renderMonthlySchoolsList();
