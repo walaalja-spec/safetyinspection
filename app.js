@@ -214,6 +214,7 @@ const translations = {
     loginBadPassword: "كلمة المرور غير صحيحة.",
     loginTooMany: "محاولات كثيرة. انتظري ١٥ دقيقة ثم حاولي مرة أخرى.",
     loginNetworkError: "تعذر الاتصال. بياناتك محفوظة على جهازك ولن تُفقد.",
+    loginServerError: (status, code) => `خطأ من الخادم (${status}: ${code}) — ليست مشكلة في كلمة المرور.`,
     loginSuccess: "تم تسجيل الدخول. ستبدأ المزامنة تلقائيًا.",
     loggedOut: "تم تسجيل الخروج. بياناتك لا تزال محفوظة على جهازك.",
     draftRestored: "↩️ تمت استعادة تعديلاتك غير المحفوظة.",
@@ -482,6 +483,7 @@ const translations = {
     loginBadPassword: "Incorrect password.",
     loginTooMany: "Too many attempts. Wait 15 minutes and try again.",
     loginNetworkError: "Couldn't connect. Your data is saved on this device and won't be lost.",
+    loginServerError: (status, code) => `Server error (${status}: ${code}) — this is not a password problem.`,
     loginSuccess: "Signed in. Syncing will start automatically.",
     loggedOut: "Signed out. Your data is still saved on this device.",
     draftRestored: "↩️ Your unsaved changes were restored.",
@@ -1408,8 +1410,18 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
       if (typeof flushSyncQueue === "function") flushSyncQueue();
     } else if (res.status === 429) {
       message = t("loginTooMany");
-    } else {
+    } else if (res.status === 401) {
+      // Only a genuine credential rejection says "wrong password".
       message = t("loginBadPassword");
+    } else {
+      // Anything else is a SERVER-side problem, not a bad password:
+      // 403 (origin rejected), 503 (secrets missing), 500, or a
+      // Cloudflare-level failure such as the Worker exceeding its CPU
+      // limit. Reporting all of these as "wrong password" sent the user
+      // hunting for a typo that was never there, so surface the real
+      // status and error code instead.
+      const code = (json && json.error) || `HTTP ${res.status}`;
+      message = t("loginServerError")(res.status, code);
     }
   } catch (netErr) {
     message = t("loginNetworkError");
