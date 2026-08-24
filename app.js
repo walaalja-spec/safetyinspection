@@ -200,6 +200,9 @@ const translations = {
     monthlyPhotoSaved: "تم حفظ الصورة.",
     monthlyPhotoDeleted: "تم حذف الصورة.",
     monthlySaveFailedQueued: "تعذر حفظ الصورة الآن. الصورة محفوظة مؤقتًا وسيُعاد المحاولة تلقائيًا.",
+    photoStatusSaving: "جاري الحفظ محليًا…",
+    photoStatusSaved: "محفوظة محليًا",
+    photoStatusRetry: "تعذر الحفظ، سيُعاد المحاولة تلقائيًا",
     pendingSaveIndicator: (n) => `🔄 ${n} ${n === 1 ? "عنصر بانتظار الحفظ" : "عناصر بانتظار الحفظ"}`,
     cloudSyncPending: (n) => `☁️ جاري مزامنة ${n} ${n === 1 ? "عنصر" : "عناصر"} مع السحابة`,
     cloudSyncNeedsAttention: "☁️ تعذّرت مزامنة بعض البيانات — البيانات محفوظة على جهازك وسيُعاد المحاولة",
@@ -469,6 +472,9 @@ const translations = {
     monthlyPhotoSaved: "Photo saved.",
     monthlyPhotoDeleted: "Photo deleted.",
     monthlySaveFailedQueued: "Couldn't save the photo right now. It's kept and will retry automatically.",
+    photoStatusSaving: "Saving locally…",
+    photoStatusSaved: "Saved locally",
+    photoStatusRetry: "Couldn't save yet, retrying automatically",
     pendingSaveIndicator: (n) => `🔄 ${n} item${n === 1 ? "" : "s"} waiting to save`,
     cloudSyncPending: (n) => `☁️ Syncing ${n} item${n === 1 ? "" : "s"} to the cloud`,
     cloudSyncNeedsAttention: "☁️ Couldn't sync some data yet — it's saved on your device and will retry automatically",
@@ -1816,7 +1822,7 @@ function applyObservationDataToForm({ text, spotLocation, category, photos, audi
 }
 
 function saveDraftNow() {
-  if (!activeReport) return;
+  if (!activeReport) return Promise.resolve(false);
   activeReport.draft = {
     editingIndex,
     text: document.getElementById("observationText").value,
@@ -1826,7 +1832,11 @@ function saveDraftNow() {
     audioBlob: stagedAudioBlob || null,
     updatedAt: Date.now()
   };
-  persistReportResilient(activeReport); // best-effort background write; already resilient (internal retries + queued fallback)
+  // Returns the resilient write's promise (true/false) so callers that
+  // need to know a specific save actually landed -- e.g. per-photo local
+  // status -- can await it, while the debounced text-only autosave below
+  // keeps firing it without waiting, exactly as before.
+  return persistReportResilient(activeReport);
 }
 
 function scheduleDraftAutosave() {
@@ -1903,14 +1913,26 @@ document.getElementById("cancelObservationBtn").addEventListener("click", async 
 });
 
 // ---- Photos ----
+// A photo with no localStatus at all (loaded from a saved observation, or
+// restored from a draft already written to disk) is implicitly already
+// saved -- only a photo just added in this session passes through
+// "saving"/"retry" first (see handlePhotoInput/persistPhotosNow).
+function photoStatusBadge(status) {
+  if (status === "saving") return { cls: "saving", icon: "⏳", label: t("photoStatusSaving") };
+  if (status === "retry") return { cls: "retry", icon: "⚠️", label: t("photoStatusRetry") };
+  return { cls: "saved", icon: "✓", label: t("photoStatusSaved") };
+}
+
 function renderPhotosGrid() {
   const grid = document.getElementById("photosGrid");
   grid.innerHTML = "";
   stagedPhotos.forEach((photo, i) => {
     const item = document.createElement("div");
     item.className = "photo-thumb";
+    const badge = photoStatusBadge(photo.localStatus);
     item.innerHTML = `
       <img src="${URL.createObjectURL(photo.blob)}" alt="">
+      <span class="photo-thumb-status photo-thumb-status--${badge.cls}" title="${escapeHtml(badge.label)}">${badge.icon}</span>
       <button type="button" class="photo-thumb-more" data-i="${i}" aria-label="${t("moreActions")}">⋯</button>
       <button type="button" class="photo-thumb-remove" data-i="${i}" aria-label="${t("removePhoto")}">✕</button>
     `;
@@ -1933,15 +1955,59 @@ document.getElementById("pickPhotoBtn").addEventListener("click", () => document
 
 let replacingPhotoIndex = null;
 
+// Retries a just-failed immediate photo save with exponential backoff
+// (1s/2s/4s/8s/16s, 5 attempts) instead of silently leaving it at "retry"
+// until the next unrelated save happens to sweep it up. The photo itself
+// is never at risk either way -- it's still sitting in stagedPhotos in
+// memory and gets included in the very next successful report save,
+// whenever that happens -- this only makes the "محفوظ محليًا" status
+// converge on its own instead of needing the user to notice and act.
+function retryPhotoLocalSave(photoIds, attempt = 1) {
+  const delay = Math.min(1000 * Math.pow(2, attempt - 1), 16000);
+  setTimeout(async () => {
+    const stillStaged = photoIds.filter((id) => stagedPhotos.some((p) => p.id === id));
+    if (!stillStaged.length) return; // removed or already superseded by a later save
+    const ok = await saveDraftNow();
+    stillStaged.forEach((id) => {
+      const p = stagedPhotos.find((sp) => sp.id === id);
+      if (p) p.localStatus = ok ? "saved" : "retry";
+    });
+    renderPhotosGrid();
+    if (!ok && attempt < 5) retryPhotoLocalSave(stillStaged, attempt + 1);
+  }, delay);
+}
+
+// Persists newly-added photos immediately (no debounce) -- unlike typed
+// text, a photo can't be "retyped" if it's lost, so it gets the same
+// resilient write (internal retries + queued fallback, see
+// persistReportResilient) right away instead of waiting up to 1.2s for
+// scheduleDraftAutosave(). This is only affordable because saveReport()
+// now externalizes photo blobs into their own small records (storage.js)
+// -- the write cost is proportional to the new photo(s), not to every
+// photo already saved earlier in the visit.
+async function persistPhotosNow(photoIds) {
+  clearTimeout(draftAutosaveTimer); // this save supersedes any pending debounced one
+  const ok = await saveDraftNow();
+  photoIds.forEach((id) => {
+    const p = stagedPhotos.find((sp) => sp.id === id);
+    if (p) p.localStatus = ok ? "saved" : "retry";
+  });
+  renderPhotosGrid();
+  if (!ok) retryPhotoLocalSave(photoIds);
+}
+
 async function handlePhotoInput(e) {
   const files = Array.from(e.target.files || []);
   if (!files.length) return;
+  const addedIds = [];
   try {
     if (replacingPhotoIndex !== null) {
       const blob = await compressImage(files[0]);
       // A fresh id, not the replaced photo's old one -- this is a
       // different image and needs its own cloud sync entry (see sync.js).
-      stagedPhotos[replacingPhotoIndex] = { id: generateId(), blob, takenAt: Date.now() };
+      const id = generateId();
+      stagedPhotos[replacingPhotoIndex] = { id, blob, takenAt: Date.now(), localStatus: "saving" };
+      addedIds.push(id);
       replacingPhotoIndex = null;
     } else {
       for (const file of files) {
@@ -1949,11 +2015,13 @@ async function handlePhotoInput(e) {
         // Stable id, independent of array position -- same reasoning as
         // observation ids (see saveCurrentObservation), needed so sync.js
         // can track each photo's own cloud-upload status individually.
-        stagedPhotos.push({ id: generateId(), blob, takenAt: Date.now() });
+        const id = generateId();
+        stagedPhotos.push({ id, blob, takenAt: Date.now(), localStatus: "saving" });
+        addedIds.push(id);
       }
     }
-    renderPhotosGrid();
-    scheduleDraftAutosave();
+    renderPhotosGrid(); // shows the photo immediately, "saving locally" badge
+    persistPhotosNow(addedIds); // not awaited -- never blocks moving to the next photo
   } catch (err) {
     console.error(err);
     showToast(currentLang === "ar" ? "تعذر إضافة الصورة." : "Couldn't add the photo.", "error");

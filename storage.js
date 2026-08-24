@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------
 
 const DB_NAME = "safety_inspection_db";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const STORE_NAME = "reports";
 const MONTHLY_TEMPLATE_STORE = "monthly_templates";
 const MONTHLY_SCHOOLS_STORE = "monthly_schools";
@@ -29,6 +29,21 @@ const SCENE_TRACKING_STORE = "scene_tracking";
 // across a restore (possibly pointing at ids that no longer exist) would
 // be a worse failure mode than simply re-scanning.
 const SYNC_QUEUE_STORE = "sync_queue";
+
+// Observation-photo blobs, one record per photo, keyed by the photo's own
+// stable id (see PHOTO_STORE below). Split out of the `reports` documents
+// specifically to fix rapid-fire field photo capture: before this, every
+// single save (including the debounced draft autosave that fires after
+// each photo) rewrote the ENTIRE report record -- every observation, every
+// photo already in it -- through blobsToBuffersForWrite(), so a save late
+// in a long visit re-converted and re-wrote every earlier photo's bytes
+// too. Cost grew with the whole visit's photo count, not with what
+// actually changed, which is exactly the "gets slower/fails deeper into a
+// visit" symptom. Now a report document only ever holds a lightweight
+// { id, takenAt } ref per photo, and each photo's bytes live in their own
+// small, independent record here -- saving stays proportional to what's
+// new, regardless of how many photos already exist.
+const PHOTO_STORE = "photo_blobs";
 
 // Single shared connection, opened once and reused — avoids the
 // overhead/edge-cases of re-opening a fresh IndexedDB connection on
@@ -69,6 +84,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains(SYNC_QUEUE_STORE)) {
         db.createObjectStore(SYNC_QUEUE_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(PHOTO_STORE)) {
+        db.createObjectStore(PHOTO_STORE, { keyPath: "id" });
       }
     };
 
@@ -135,7 +153,19 @@ async function withRetry(fn, retries = 3, delayMs = 250) {
   throw lastErr;
 }
 
+// crypto.randomUUID() (Chrome/Safari/Firefox all current) gives a
+// collision probability low enough to ignore even for photos captured in
+// the same millisecond during a rapid burst -- the old Date.now() + small
+// random suffix scheme could theoretically collide two ids landing in the
+// same millisecond of a fast synchronous loop (e.g. a multi-photo gallery
+// picker), which would silently overwrite one photo's record with
+// another's under the same key. Falls back to the old scheme only for a
+// browser old enough to lack randomUUID (never seen in this app's actual
+// support range, but cheap to keep as a safety net).
 function generateId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return "r_" + crypto.randomUUID();
+  }
   return "r_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
 }
 
@@ -206,11 +236,169 @@ async function getAllReports() {
     req.onerror = () => reject(req.error);
   });
   reports.sort((a, b) => b.createdAt - a.createdAt);
-  return reports.map(buffersToBlobsAfterRead);
+  const out = [];
+  for (const r of reports) out.push(await hydrateReportPhotos(buffersToBlobsAfterRead(r)));
+  return out;
 }
 
+// --- Observation-photo externalization (see PHOTO_STORE above) ---
+
+// Ids already confirmed written to PHOTO_STORE this session. A photo's
+// bytes never change once captured (each edit/replace gets a fresh id --
+// see handlePhotoInput in app.js), so once an id is in here, writing it
+// again would just re-encode and re-put identical bytes for no reason.
+// Without this, externalizeReportPhotos() re-detects a Blob still
+// attached in memory (kept there on purpose so rendering/PDF/PPTX keep
+// working -- see its own comment) on every save and redundantly
+// re-persists every OLDER observation's photos too, not just the new
+// one -- which is exactly the "gets slower the more photos a visit
+// already has" cost this whole change exists to remove. A save of photo
+// #30 in a visit must cost the same as saving photo #1, not 30x it.
+const knownExternalizedPhotoIds = new Set();
+
+async function savePhotoBlob(id, blob) {
+  if (knownExternalizedPhotoIds.has(id)) return true;
+  const buf = await blobsToBuffersForWrite(blob);
+  await withRetry(async () => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PHOTO_STORE, "readwrite");
+      tx.objectStore(PHOTO_STORE).put({ id, ...buf });
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
+    });
+  });
+  knownExternalizedPhotoIds.add(id);
+  return true;
+}
+
+async function getPhotoBlob(id) {
+  const db = await openDB();
+  const rec = await new Promise((resolve, reject) => {
+    const req = db.transaction(PHOTO_STORE, "readonly").objectStore(PHOTO_STORE).get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+  if (rec) knownExternalizedPhotoIds.add(id); // already durably there -- a later save of this report shouldn't re-write it just because hydration re-attached the Blob for rendering
+  return rec ? buffersToBlobsAfterRead(rec) : null;
+}
+
+async function deletePhotoBlobs(ids) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return;
+  await withRetry(async () => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PHOTO_STORE, "readwrite");
+      const store = tx.objectStore(PHOTO_STORE);
+      unique.forEach((id) => store.delete(id));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
+    });
+  });
+  unique.forEach((id) => knownExternalizedPhotoIds.delete(id));
+}
+
+// Collects the ids of every externalizable photo currently referenced by
+// a report (used to clean up PHOTO_STORE when the report is deleted).
+function collectReportPhotoIds(report) {
+  const ids = [];
+  for (const obs of (report && report.observations) || []) {
+    for (const p of obsPhotos(obs)) if (p && p.id) ids.push(p.id);
+  }
+  if (report && report.draft && Array.isArray(report.draft.photos)) {
+    for (const p of report.draft.photos) if (p && p.id) ids.push(p.id);
+  }
+  return ids;
+}
+
+// Pulls every observation-photo Blob out of a report into PHOTO_STORE,
+// replacing it in the (returned, NOT mutated) copy with a lightweight
+// { id, takenAt } ref. The original `report` object -- and every Blob a
+// caller may already be holding a reference to for rendering -- is left
+// untouched, so this is safe to call from inside saveReport() without
+// breaking whatever's currently on screen. A photo that already has no
+// inline Blob (already externalized, or a legacy pre-id record that never
+// gets one) is passed through unchanged -- this only ever adds work for
+// genuinely new photo bytes.
+async function externalizeReportPhotos(report) {
+  const stripPhotos = async (photos) => {
+    if (!Array.isArray(photos)) return photos;
+    const out = [];
+    for (const p of photos) {
+      if (p && p.blob instanceof Blob && p.id) {
+        // Skip the async round-trip entirely for a photo already known to
+        // be durably stored -- not just an optimization inside
+        // savePhotoBlob(), but one fewer microtask hop per already-saved
+        // photo in a growing report, on every single new-photo save.
+        if (!knownExternalizedPhotoIds.has(p.id)) await savePhotoBlob(p.id, p.blob);
+        out.push({ id: p.id, takenAt: p.takenAt });
+      } else {
+        out.push(p);
+      }
+    }
+    return out;
+  };
+
+  const observations = [];
+  for (const obs of report.observations || []) {
+    if (obs && Array.isArray(obs.photos)) {
+      observations.push({ ...obs, photos: await stripPhotos(obs.photos) });
+    } else {
+      observations.push(obs);
+    }
+  }
+
+  let draft = report.draft;
+  if (draft && Array.isArray(draft.photos)) {
+    draft = { ...draft, photos: await stripPhotos(draft.photos) };
+  }
+
+  return { ...report, observations, draft };
+}
+
+// Reverses externalizeReportPhotos() on a freshly-read report: attaches
+// the real Blob back onto every photo ref by id. Mutates the given
+// `report` in place (it was just constructed fresh from IndexedDB, so
+// nothing else holds a reference to it yet).
+async function hydrateReportPhotos(report) {
+  const hydratePhotos = async (photos) => {
+    if (!Array.isArray(photos)) return;
+    for (let i = 0; i < photos.length; i++) {
+      const p = photos[i];
+      if (p && !(p.blob instanceof Blob) && p.id) {
+        const blob = await getPhotoBlob(p.id);
+        if (blob) photos[i] = { ...p, blob };
+      }
+    }
+  };
+  for (const obs of report.observations || []) await hydratePhotos(obs.photos);
+  if (report.draft) await hydratePhotos(report.draft.photos);
+  return report;
+}
+
+// Serializes concurrent saveReport() calls for the same report id (e.g. a
+// rapid-fire photo triggering an immediate draft save while the previous
+// one is still writing) so writes always land in strict order and never
+// interleave -- one full round-trip at a time per report, never two.
+const reportSaveChains = new Map();
+
 async function saveReport(report) {
-  const safeReport = await blobsToBuffersForWrite(report);
+  const prior = reportSaveChains.get(report.id) || Promise.resolve();
+  const run = prior.catch(() => {}).then(() => doSaveReport(report));
+  reportSaveChains.set(report.id, run);
+  try {
+    return await run;
+  } finally {
+    if (reportSaveChains.get(report.id) === run) reportSaveChains.delete(report.id);
+  }
+}
+
+async function doSaveReport(report) {
+  const externalized = await externalizeReportPhotos(report);
+  const safeReport = await blobsToBuffersForWrite(externalized);
   return withRetry(async () => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
@@ -230,10 +418,27 @@ async function getReportById(id) {
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
-  return report ? buffersToBlobsAfterRead(report) : null;
+  return report ? await hydrateReportPhotos(buffersToBlobsAfterRead(report)) : null;
 }
 
 async function deleteReportById(id) {
+  // Best-effort: also free the report's externalized photo blobs. Reads
+  // the raw (un-hydrated) record -- photo refs already carry their id
+  // either way, so there's no need to fetch every photo's actual bytes
+  // just to delete them by id. If this lookup fails for any reason the
+  // report delete below still proceeds -- a few orphaned photo records
+  // are a harmless storage-space cost, never a correctness issue.
+  try {
+    const db0 = await openDB();
+    const raw = await new Promise((resolve, reject) => {
+      const req = db0.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    if (raw) await deletePhotoBlobs(collectReportPhotoIds(buffersToBlobsAfterRead(raw)));
+  } catch (err) {
+    console.warn("Could not clean up photo blobs for deleted report (non-critical):", err);
+  }
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
