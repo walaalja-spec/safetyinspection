@@ -515,6 +515,47 @@ async function recordLoginAttempt(env, ip) {
   }
 }
 
+// Throughput protection for write requests (POST/PUT/DELETE) on the
+// already-authenticated API -- a different concern from the login
+// brute-force limiter above (that one guards the password itself; this
+// one just caps abusive/runaway request volume once someone is already
+// signed in). Backed by its own D1 table (migrations/0003) for the same
+// reason: an in-memory counter resets on every isolate recycle.
+//
+// The limit is deliberately generous: a single rapid field-photo burst
+// sends 2 write requests per photo (upload + confirm), so even 20 photos
+// back-to-back is ~40 requests -- and sync.js's own queue processes them
+// one at a time, awaited in sequence (see flushSyncQueue), so they are
+// never actually fired concurrently in the first place. 60/60s comfortably
+// covers a real burst plus normal note-taking with real headroom to spare,
+// while still catching a genuinely abusive/broken client.
+const WRITE_RATE_LIMIT_MAX = 60;
+const WRITE_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+
+async function writeRateLimited(env, ip) {
+  try {
+    const since = Date.now() - WRITE_RATE_LIMIT_WINDOW_MS;
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM api_write_attempts WHERE ip = ? AND attempted_at > ?"
+    ).bind(ip, since).first();
+    return !!row && row.n >= WRITE_RATE_LIMIT_MAX;
+  } catch (e) {
+    // Table missing (migration 0003 not applied yet) must not block real
+    // saves -- fail open, exactly like loginRateLimited above.
+    console.error("Write rate-limit check unavailable:", e);
+    return false;
+  }
+}
+
+async function recordWriteAttempt(env, ip) {
+  try {
+    await env.DB.prepare("INSERT INTO api_write_attempts (ip, attempted_at) VALUES (?, ?)").bind(ip, Date.now()).run();
+    await env.DB.prepare("DELETE FROM api_write_attempts WHERE attempted_at < ?").bind(Date.now() - WRITE_RATE_LIMIT_WINDOW_MS).run();
+  } catch (e) {
+    console.error("Could not record write attempt:", e);
+  }
+}
+
 async function handleAuth(request, env, action) {
   if (action === "session" && request.method === "GET") {
     const session = await verifySessionToken(readCookie(request, SESSION_COOKIE), env);
@@ -678,6 +719,22 @@ async function handleApi(request, env, url) {
 
   if (!env.DB || !env.BUCKET) {
     return apiErr("cloud_storage_not_configured", 500);
+  }
+
+  // Write-throughput protection, scoped to POST/PUT/DELETE only -- GET
+  // reads are never rate-limited. The client's own sync engine (sync.js)
+  // already treats a non-2xx/non-permanent status as transient and
+  // retries with backoff without discarding anything from its queue, so
+  // 429 here needs no special handling on top of what already exists.
+  if (request.method === "POST" || request.method === "PUT" || request.method === "DELETE") {
+    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+    if (await writeRateLimited(env, ip)) {
+      return new Response(JSON.stringify({ success: false, error: "rate_limited" }), {
+        status: 429,
+        headers: { ...JSON_HEADERS, "Retry-After": String(WRITE_RATE_LIMIT_WINDOW_MS / 1000) }
+      });
+    }
+    await recordWriteAttempt(env, ip);
   }
 
   try {
