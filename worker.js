@@ -364,6 +364,54 @@ function base64UrlDecode(str) {
   return atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
 }
 
+// Which credential scheme is configured, if any.
+//
+// "token" (recommended): a single APP_PASSWORD secret, compared in
+// constant time. Costs microseconds.
+//
+// "pbkdf2" (legacy): the original AUTH_PASSWORD_SALT + AUTH_PASSWORD_HASH
+// pair. Kept so an existing setup keeps working, but it is NOT the
+// recommended path -- 210,000 PBKDF2 iterations measure ~94ms of CPU,
+// while Workers on the free plan allow 10ms per request, so the runtime
+// can terminate the isolate mid-verification and a perfectly correct
+// password is rejected. `wrangler dev` enforces no CPU limit, which is
+// why this passed every local test and still failed in production.
+function authMode(env) {
+  if (readSecret(env, "APP_PASSWORD")) return "token";
+  if (readSecret(env, "AUTH_PASSWORD_HASH") && readSecret(env, "AUTH_PASSWORD_SALT")) return "pbkdf2";
+  return null;
+}
+
+// Why comparing a stored password directly is an appropriate choice
+// here, rather than a weakening:
+//
+//  * Hashing protects a stored credential from OFFLINE cracking if the
+//    store leaks on its own. Cloudflare Worker secrets do not leak on
+//    their own -- anyone who can read APP_PASSWORD can equally read
+//    SESSION_SECRET and forge sessions outright, so the hash buys
+//    nothing against the attacker it is meant to stop.
+//  * The realistic attack is ONLINE guessing, and that is stopped by
+//    rate limiting (8 attempts per IP per 15 minutes) plus a
+//    high-entropy value -- neither of which depends on hashing.
+//  * A KDF slow enough to be worth having is, on this platform, slow
+//    enough to break the request. A scheme that cannot run is not
+//    security.
+//
+// The tradeoff that IS real: whoever can read the secret learns the
+// literal string. So use a generated random token, never a password
+// reused anywhere else.
+async function passwordMatches(candidate, env) {
+  const mode = authMode(env);
+  if (mode === "token") {
+    return timingSafeEqual(candidate, readSecret(env, "APP_PASSWORD"));
+  }
+  if (mode === "pbkdf2") {
+    const derived = await pbkdf2Hex(candidate, readSecret(env, "AUTH_PASSWORD_SALT"));
+    return timingSafeEqual(derived, readSecret(env, "AUTH_PASSWORD_HASH"));
+  }
+  return false;
+}
+
 async function pbkdf2Hex(password, saltHex) {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
@@ -482,10 +530,15 @@ async function handleAuth(request, env, action) {
     // two apart. Knowing that the hash is 64 hex characters reveals
     // nothing exploitable: that is simply the published output size of
     // PBKDF2-SHA256, which the algorithm choice already implies.
+    const mode = authMode(env);
     const setup = {
+      // Which scheme is live. "token" is the fast, recommended one;
+      // "pbkdf2" is the legacy pair that can exceed the Worker CPU limit.
+      mode: mode || "none",
+      sessionSecretPresent: !!sessionSecret,
+      appPasswordPresent: !!readSecret(env, "APP_PASSWORD"),
       saltPresent: !!salt,
       hashPresent: !!hash,
-      sessionSecretPresent: !!sessionSecret,
       // A correct hash is exactly 64 lowercase hex chars. Anything else
       // means it was truncated, uppercased, or partially pasted.
       hashLooksValid: typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash),
@@ -497,7 +550,7 @@ async function handleAuth(request, env, action) {
     // stay in local-only mode instead of showing an unusable login form.
     return apiOk({
       authenticated: !!session,
-      configured: !!(hash && salt && sessionSecret),
+      configured: !!(mode && sessionSecret),
       expiresAt: session ? session.exp : null,
       setup
     });
@@ -511,7 +564,7 @@ async function handleAuth(request, env, action) {
   }
 
   if (action === "login" && request.method === "POST") {
-    if (!readSecret(env, "AUTH_PASSWORD_HASH") || !readSecret(env, "AUTH_PASSWORD_SALT") || !readSecret(env, "SESSION_SECRET")) {
+    if (!authMode(env) || !readSecret(env, "SESSION_SECRET")) {
       return apiErr("auth_not_configured", 503);
     }
     const ip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -524,8 +577,7 @@ async function handleAuth(request, env, action) {
       return apiErr("invalid_credentials", 401);
     }
 
-    const candidate = await pbkdf2Hex(body.password, readSecret(env, "AUTH_PASSWORD_SALT"));
-    if (!timingSafeEqual(candidate, readSecret(env, "AUTH_PASSWORD_HASH"))) {
+    if (!(await passwordMatches(body.password, env))) {
       await recordLoginAttempt(env, ip);
       // Deliberately identical to the empty-password error: never reveal
       // whether a password was close, or that the account exists.
