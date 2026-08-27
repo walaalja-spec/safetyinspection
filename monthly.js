@@ -58,12 +58,14 @@ async function renderMonthlySchoolsList() {
 
     const card = document.createElement("div");
     card.className = "monthly-school-card";
+    card.dataset.id = school.id;
     card.innerHTML = `
-      <h4>${escapeHtml(school.name)}</h4>
+      <h4 class="monthly-school-name">${escapeHtml(school.name)}</h4>
       <div class="monthly-progress-bar"><div class="monthly-progress-fill" style="width:${pct}%"></div></div>
       <p class="muted">${t("monthlyProgress")(doneCount, monthlySlots.length)}</p>
       <div class="card-actions">
         <button class="card-open monthly-open" data-id="${school.id}">${t("monthlyOpenBtn")}</button>
+        <button class="card-edit monthly-edit-school" data-id="${school.id}">${t("monthlyEditBtn")}</button>
         <button class="card-delete monthly-delete-school" data-id="${school.id}">${t("deleteBtn")}</button>
       </div>
     `;
@@ -72,6 +74,9 @@ async function renderMonthlySchoolsList() {
 
   listEl.querySelectorAll(".monthly-open").forEach((btn) => {
     btn.addEventListener("click", () => openSchoolPhotos(btn.dataset.id));
+  });
+  listEl.querySelectorAll(".monthly-edit-school").forEach((btn) => {
+    btn.addEventListener("click", () => startEditingMonthlySchoolName(btn.dataset.id));
   });
   listEl.querySelectorAll(".monthly-delete-school").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -82,6 +87,46 @@ async function renderMonthlySchoolsList() {
         renderMonthlySchoolsList();
       }
     });
+  });
+}
+
+// Swaps one school card's name (only) into an inline text input + save/
+// cancel — e.g. to fix a mismatch against master-template.pptx's own
+// spelling of that school's name (see pptx.js's school-matching, which
+// requires an exact match after only light normalization). Only the
+// clicked card is touched; the rest of the list is left as-is.
+function startEditingMonthlySchoolName(schoolId) {
+  const school = monthlySchools.find((s) => s.id === schoolId);
+  if (!school) return;
+  const card = document.querySelector(`.monthly-school-card[data-id="${schoolId}"]`);
+  if (!card) return;
+  const nameEl = card.querySelector(".monthly-school-name");
+
+  nameEl.innerHTML = `
+    <input type="text" class="monthly-school-rename-input" value="${escapeHtml(school.name)}">
+    <button type="button" class="monthly-school-rename-save" aria-label="${t("monthlySaveBtn")}">✓</button>
+    <button type="button" class="monthly-school-rename-cancel" aria-label="${t("btnCancel")}">✕</button>
+  `;
+  const input = nameEl.querySelector(".monthly-school-rename-input");
+  input.focus();
+  input.select();
+
+  const save = async () => {
+    const newName = input.value.trim();
+    if (!newName) {
+      showToast(t("needSchoolName"), "warning");
+      return;
+    }
+    await updateMonthlySchoolName(schoolId, newName);
+    monthlySchools = await getAllMonthlySchools();
+    showToast(t("monthlySchoolRenamed"), "success");
+    renderMonthlySchoolsList();
+  };
+  nameEl.querySelector(".monthly-school-rename-save").addEventListener("click", save);
+  nameEl.querySelector(".monthly-school-rename-cancel").addEventListener("click", () => renderMonthlySchoolsList());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") save();
+    if (e.key === "Escape") renderMonthlySchoolsList();
   });
 }
 

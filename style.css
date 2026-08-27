@@ -288,11 +288,25 @@ html[dir="ltr"] select { background-position: right 14px center; }
 }
 .card-actions button:active { transform: scale(0.96); }
 .card-open { background: var(--brand); color: #fff; }
+.card-edit { background: var(--brand-100); color: var(--brand); }
 .card-delete { background: var(--red-100); color: var(--red); }
 @media (hover: hover) and (pointer: fine) {
   .card-open:hover { filter: brightness(1.12); }
+  .card-edit:hover { filter: brightness(0.97); }
   .card-delete:hover { filter: brightness(0.97); }
 }
+
+.monthly-school-name { display: flex; align-items: center; gap: 6px; }
+.monthly-school-rename-input {
+  flex: 1; font-size: var(--fs-lg); font-weight: 700; padding: 6px 10px;
+  border: 1px solid var(--brand-100); border-radius: var(--r-sm);
+}
+.monthly-school-rename-save, .monthly-school-rename-cancel {
+  flex: none; width: 34px; height: 34px; border: none; border-radius: var(--r-sm);
+  font-size: 1rem; font-weight: 800;
+}
+.monthly-school-rename-save { background: var(--brand-100); color: var(--brand); }
+.monthly-school-rename-cancel { background: var(--red-100); color: var(--red); }
 
 @media (hover: hover) and (pointer: fine) {
   .report-card:hover, .obs-card:hover, .stat-card:hover, .recent-visit-card:hover,
@@ -571,8 +585,8 @@ html[dir="ltr"] select { background-position: right 14px center; }
 /* ---------- Monthly photos ---------- */
 .monthly-school-card { padding: 15px; margin-bottom: 12px; }
 .monthly-school-card h4 { font-size: var(--fs-lg); margin-bottom: 6px; }
-.monthly-school-card .card-actions { justify-content: flex-start; }
-.monthly-school-card .card-actions button { flex: none; padding: 9px 20px; }
+.monthly-school-card .card-actions { justify-content: flex-start; flex-wrap: wrap; }
+.monthly-school-card .card-actions button { flex: none; padding: 9px 16px; }
 
 .monthly-slot-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 10px; }
 .monthly-slot-row input { flex: 1; padding: 10px; box-shadow: none; }
