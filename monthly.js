@@ -419,91 +419,66 @@ document.getElementById("generatePptxBtn").addEventListener("click", async () =>
   }
 });
 
-// ---------- Multi-school PowerPoint ----------
+// ---------- Multi-school PowerPoint (master-template based) ----------
+// Master-template.pptx already has one slide PER school (all 38, fixed) —
+// there's nothing for the user to "select", so this flow skips straight
+// from the button to a validation summary (screen-multi-school-summary,
+// reused as-is) and then generation. screen-multi-school-select and its
+// checkboxes are no longer used by this button, but are left in place
+// (dead HTML) rather than removed.
+let lastMasterValidation = null;
+
 document.getElementById("openMultiSchoolBtn").addEventListener("click", async () => {
-  document.getElementById("multiSchoolMonthLabel").textContent = currentMonthKey;
-
-  const listEl = document.getElementById("multiSchoolCheckList");
-  const emptyEl = document.getElementById("noMultiSchoolsMsg");
-  listEl.innerHTML = "";
-
-  if (monthlySchools.length === 0) {
-    emptyEl.style.display = "block";
-  } else {
-    emptyEl.style.display = "none";
-    for (const school of monthlySchools) {
-      const submission = await getMonthlySubmission(school.id, currentMonthKey);
-      const completeness = computePptxCompleteness(monthlySlots, submission);
-      const row = document.createElement("label");
-      row.className = "multi-school-check-row";
-      row.innerHTML = `
-        <input type="checkbox" class="msc-checkbox" data-id="${school.id}">
-        <div class="msc-info">
-          <h4>${escapeHtml(school.name)}</h4>
-          <p>${completeness.done} / ${completeness.total} ${currentLang === "ar" ? "صورة" : "photos"}</p>
-        </div>
-      `;
-      listEl.appendChild(row);
-    }
-  }
-
-  showScreen("screen-multi-school-select");
+  await runMasterValidationAndShowSummary();
 });
 
-document.getElementById("multiSelectAllBtn").addEventListener("click", () => {
-  document.querySelectorAll(".msc-checkbox").forEach((cb) => (cb.checked = true));
-});
-document.getElementById("multiSelectNoneBtn").addEventListener("click", () => {
-  document.querySelectorAll(".msc-checkbox").forEach((cb) => (cb.checked = false));
-});
-
-document.getElementById("multiSchoolBackBtn").addEventListener("click", () => {
-  showScreen("screen-monthly-home");
-});
-
-let multiSelectedSchools = [];
-
-document.getElementById("multiSchoolNextBtn").addEventListener("click", async () => {
-  const checkedIds = Array.from(document.querySelectorAll(".msc-checkbox:checked")).map((cb) => cb.dataset.id);
-  if (checkedIds.length === 0) {
-    showToast(t("multiNeedSelection"), "warning");
-    return;
-  }
-  // Order follows the current app/list order (monthlySchools), not
-  // checkbox-click order — matches "استخدم ترتيب المدارس الحالي".
-  multiSelectedSchools = monthlySchools.filter((s) => checkedIds.includes(s.id));
-
+async function runMasterValidationAndShowSummary() {
   document.getElementById("multiSummaryMonth").textContent = currentMonthKey;
-  document.getElementById("multiSummarySchoolCount").textContent = multiSelectedSchools.length;
 
   const perSchoolList = document.getElementById("multiSummaryPerSchoolList");
-  perSchoolList.innerHTML = "";
-  const missingParts = [];
-
-  for (const school of multiSelectedSchools) {
-    const submission = await getMonthlySubmission(school.id, currentMonthKey);
-    const completeness = computePptxCompleteness(monthlySlots, submission);
-    const row = document.createElement("p");
-    row.textContent = `${school.name} — ${completeness.done}/${completeness.total}`;
-    perSchoolList.appendChild(row);
-    if (completeness.missingLabels.length > 0) {
-      missingParts.push(`${school.name}: ${completeness.missingLabels.join("، ")}`);
-    }
-  }
-
   const missingNote = document.getElementById("multiMissingNote");
-  if (missingParts.length > 0) {
-    missingNote.style.display = "block";
-    missingNote.textContent = t("multiMissingWarning") + " " + missingParts.join(" | ");
-  } else {
-    missingNote.style.display = "none";
-  }
+  const generateBtn = document.getElementById("generateMultiPptxBtn");
+
+  perSchoolList.innerHTML = `<p class="muted">${currentLang === "ar" ? "⏳ جارٍ فحص القالب ومطابقة المدارس..." : "⏳ Checking template and matching schools..."}</p>`;
+  missingNote.style.display = "none";
+  generateBtn.disabled = true;
+  document.getElementById("multiSummarySchoolCount").textContent = "…";
 
   showScreen("screen-multi-school-summary");
-});
+
+  const validation = await validateMasterSchoolsPptx(currentMonthKey);
+  lastMasterValidation = validation;
+
+  document.getElementById("multiSummarySchoolCount").textContent = validation.matchedCount;
+
+  const statLines = [
+    `عدد المدارس في القالب: ${validation.templateSlideCount || "-"}`,
+    `المدارس المطابقة: ${validation.matchedCount}`,
+    `المدارس غير المطابقة: ${validation.unmatchedSlides.length}`,
+    `الصور الجديدة: ${validation.newPhotosCount}`,
+    `الشرائح التي ستتحدث: ${validation.slidesWillUpdate}`,
+    `الخانات التي ستبقى كما هي: ${validation.slotsUnchangedCount}`
+  ];
+  let html = `<div class="pptx-summary-card">${statLines.map((l) => `<p>${escapeHtml(l)}</p>`).join("")}</div>`;
+
+  if (validation.unmatchedSlides.length > 0) {
+    const names = validation.unmatchedSlides.map((u) => `الشريحة ${u.slide}: ${u.rawName}`).join("، ");
+    html += `<p class="previous-visit-note">مدارس في القالب لم يُعثر لها على مطابقة في قائمة مدارسك (ستبقى شرائحها كما هي بدون تحديث): ${escapeHtml(names)}</p>`;
+  }
+
+  perSchoolList.innerHTML = html;
+
+  if (!validation.ok) {
+    missingNote.style.display = "block";
+    missingNote.textContent = validation.errorMessage || "تعذّر التحقق من القالب.";
+    generateBtn.disabled = true;
+  } else {
+    generateBtn.disabled = false;
+  }
+}
 
 document.getElementById("multiSummaryBackBtn").addEventListener("click", () => {
-  showScreen("screen-multi-school-select");
+  showScreen("screen-monthly-home");
 });
 
 document.getElementById("generateMultiPptxBtn").addEventListener("click", async () => {
@@ -512,7 +487,7 @@ document.getElementById("generateMultiPptxBtn").addEventListener("click", async 
   btn.disabled = true;
   msg.style.display = "block";
   try {
-    const { blob, fileName } = await generateMultiSchoolPptx(multiSelectedSchools, currentMonthKey);
+    const { blob, fileName } = await generateMasterSchoolsPptx(currentMonthKey);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -522,8 +497,8 @@ document.getElementById("generateMultiPptxBtn").addEventListener("click", async 
     document.body.removeChild(a);
     showToast(t("pptxGenerated"), "success");
   } catch (err) {
-    console.error("Multi-school PPTX generation failed:", err);
-    showToast(t("pptxGenerateFailed"), "error");
+    console.error("Master-template PPTX generation failed:", err);
+    showToast((err && err.validation && err.validation.errorMessage) || t("pptxGenerateFailed"), "error");
   } finally {
     btn.disabled = false;
     msg.style.display = "none";
