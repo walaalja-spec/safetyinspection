@@ -1043,6 +1043,21 @@ async function updateMonthlySchoolName(id, name) {
   return school;
 }
 
+// Per-school opt-out of the school-name+date overlay burned onto photos
+// (in-app preview/share, and every PPTX export) -- e.g. a school that's
+// already documented from elsewhere. `documentPhotos` is left unset on
+// existing/new records until explicitly turned off here, and every
+// reader treats `documentPhotos === false` as the only "off" case, so
+// this is a pure opt-out with no migration needed.
+async function updateMonthlySchoolDocumentation(id, enabled) {
+  const school = await storeGet(MONTHLY_SCHOOLS_STORE, id);
+  if (!school) return null;
+  school.documentPhotos = enabled;
+  school.updatedAt = Date.now();
+  await storePut(MONTHLY_SCHOOLS_STORE, school);
+  return school;
+}
+
 function submissionId(schoolId, monthKey) {
   return `${schoolId}__${monthKey}`;
 }

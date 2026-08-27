@@ -229,6 +229,7 @@ async function openSchoolPhotos(schoolId) {
 
   document.getElementById("monthlySchoolTitle").textContent = activeSchool.name;
   document.getElementById("monthlyVisitDateInput").value = activeSubmission.visitDate || `${currentMonthKey}-01`;
+  document.getElementById("monthlyDocumentPhotosToggle").checked = activeSchool.documentPhotos !== false;
   await renderMonthlySlotsGrid();
   showScreen("screen-monthly-school");
 }
@@ -236,6 +237,13 @@ async function openSchoolPhotos(schoolId) {
 document.getElementById("monthlyVisitDateInput").addEventListener("change", async (e) => {
   activeSubmission.visitDate = e.target.value;
   await saveMonthlySubmission(activeSubmission);
+  await renderMonthlySlotsGrid();
+});
+
+document.getElementById("monthlyDocumentPhotosToggle").addEventListener("change", async (e) => {
+  await updateMonthlySchoolDocumentation(activeSchool.id, e.target.checked);
+  activeSchool.documentPhotos = e.target.checked;
+  monthlySchools = await getAllMonthlySchools();
   await renderMonthlySlotsGrid();
 });
 
@@ -290,21 +298,28 @@ async function renderMonthlySlotsGrid() {
     grid.appendChild(card);
 
     if (entry) {
-      const lines = monthlyOverlayLines(activeSchool.name, activeSubmission.visitDate);
-      createDocumentedPhoto(entry.blob, lines, currentLang === "ar")
-        .then((docBlob) => {
-          const img = document.createElement("img");
-          img.src = URL.createObjectURL(docBlob);
-          img.alt = "";
-          card.querySelector(".monthly-slot-photo-box").prepend(img);
-        })
-        .catch((err) => {
-          console.error("Failed to generate documented photo, showing original instead:", err);
-          const img = document.createElement("img");
-          img.src = URL.createObjectURL(entry.blob);
-          img.alt = "";
-          card.querySelector(".monthly-slot-photo-box").prepend(img);
-        });
+      if (activeSchool.documentPhotos === false) {
+        const img = document.createElement("img");
+        img.src = URL.createObjectURL(entry.blob);
+        img.alt = "";
+        card.querySelector(".monthly-slot-photo-box").prepend(img);
+      } else {
+        const lines = monthlyOverlayLines(activeSchool.name, activeSubmission.visitDate);
+        createDocumentedPhoto(entry.blob, lines, currentLang === "ar")
+          .then((docBlob) => {
+            const img = document.createElement("img");
+            img.src = URL.createObjectURL(docBlob);
+            img.alt = "";
+            card.querySelector(".monthly-slot-photo-box").prepend(img);
+          })
+          .catch((err) => {
+            console.error("Failed to generate documented photo, showing original instead:", err);
+            const img = document.createElement("img");
+            img.src = URL.createObjectURL(entry.blob);
+            img.alt = "";
+            card.querySelector(".monthly-slot-photo-box").prepend(img);
+          });
+      }
     }
   }
 
@@ -342,9 +357,12 @@ async function renderMonthlySlotsGrid() {
       const slot = monthlySlots.find((s) => s.id === btn.dataset.slot);
       const entry = activeSubmission.photos[btn.dataset.slot];
       if (!slot || !entry) return;
-      const lines = monthlyOverlayLines(activeSchool.name, activeSubmission.visitDate);
-      const docBlob = await createDocumentedPhoto(entry.blob, lines, currentLang === "ar");
-      const result = await sharePhotoBlob(docBlob, monthlyFileName(activeSchool, slot, "jpg"));
+      let shareBlob = entry.blob;
+      if (activeSchool.documentPhotos !== false) {
+        const lines = monthlyOverlayLines(activeSchool.name, activeSubmission.visitDate);
+        shareBlob = await createDocumentedPhoto(entry.blob, lines, currentLang === "ar");
+      }
+      const result = await sharePhotoBlob(shareBlob, monthlyFileName(activeSchool, slot, "jpg"));
       if (result === "fallback") showToast(t("shareFallbackMsg"));
     });
   });
