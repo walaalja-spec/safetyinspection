@@ -1030,6 +1030,19 @@ async function deleteMonthlySchool(id) {
   await storeDelete(MONTHLY_SCHOOLS_STORE, id);
 }
 
+// Renaming matters beyond display: pptx.js's master-template export
+// matches each template slide to a school by exact (normalized) name
+// text, so this is how a mismatch between a school's name here and its
+// name inside master-template.pptx gets fixed.
+async function updateMonthlySchoolName(id, name) {
+  const school = await storeGet(MONTHLY_SCHOOLS_STORE, id);
+  if (!school) return null;
+  school.name = name;
+  school.updatedAt = Date.now();
+  await storePut(MONTHLY_SCHOOLS_STORE, school);
+  return school;
+}
+
 function submissionId(schoolId, monthKey) {
   return `${schoolId}__${monthKey}`;
 }
