@@ -487,6 +487,7 @@ async function runMasterValidationAndShowSummary() {
   perSchoolList.innerHTML = `<p class="muted">${currentLang === "ar" ? "⏳ جارٍ فحص القالب ومطابقة المدارس..." : "⏳ Checking template and matching schools..."}</p>`;
   missingNote.style.display = "none";
   generateBtn.disabled = true;
+  document.getElementById("fixUnmatchedNamesBtn").style.display = "none";
   document.getElementById("multiSummarySchoolCount").textContent = "…";
 
   showScreen("screen-multi-school-summary");
@@ -513,6 +514,8 @@ async function runMasterValidationAndShowSummary() {
 
   perSchoolList.innerHTML = html;
 
+  document.getElementById("fixUnmatchedNamesBtn").style.display = validation.unmatchedSlides.length > 0 ? "block" : "none";
+
   if (!validation.ok) {
     missingNote.style.display = "block";
     missingNote.textContent = validation.errorMessage || "تعذّر التحقق من القالب.";
@@ -524,6 +527,90 @@ async function runMasterValidationAndShowSummary() {
 
 document.getElementById("multiSummaryBackBtn").addEventListener("click", () => {
   showScreen("screen-monthly-home");
+});
+
+document.getElementById("fixUnmatchedNamesBtn").addEventListener("click", () => {
+  renderNameMatchingScreen();
+  showScreen("screen-name-matching");
+});
+
+// One row per template school that couldn't be matched to any of your
+// schools -- each is fixed structurally (rename an existing school to
+// the template's own text, or add it as new), never by loosening the
+// matching rule itself, so two different schools can never end up
+// sharing one slide.
+function renderNameMatchingScreen() {
+  const listEl = document.getElementById("nameMatchingList");
+  const doneMsg = document.getElementById("nameMatchingDoneMsg");
+  listEl.innerHTML = "";
+
+  const unmatched = (lastMasterValidation && lastMasterValidation.unmatchedSlides) || [];
+  if (unmatched.length === 0) {
+    doneMsg.style.display = "block";
+    return;
+  }
+  doneMsg.style.display = "none";
+
+  // Schools already claimed by a matched slide are left out of the
+  // picker -- renaming one here would both break its existing correct
+  // match and risk two slides claiming the same school.
+  const matchedSchoolIds = new Set();
+  Object.values(lastMasterValidation.slideMatches || {}).forEach((m) => {
+    if (m.matchedSchool) matchedSchoolIds.add(m.matchedSchool.id);
+  });
+  const freeSchools = monthlySchools.filter((s) => !matchedSchoolIds.has(s.id));
+
+  unmatched.forEach((u, idx) => {
+    const row = document.createElement("div");
+    row.className = "name-match-row";
+    row.innerHTML = `
+      <p class="name-match-template-name">${escapeHtml(u.rawName)}</p>
+      <div class="name-match-controls">
+        <select class="name-match-select" data-idx="${idx}">
+          <option value="__new__">${t("nameMatchingAddNewOption")}</option>
+          <option value="" disabled selected>${t("nameMatchingSelectPlaceholder")}</option>
+          ${freeSchools.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("")}
+        </select>
+        <button type="button" class="name-match-apply" data-idx="${idx}">${t("nameMatchingApplyBtn")}</button>
+      </div>
+    `;
+    listEl.appendChild(row);
+  });
+
+  listEl.querySelectorAll(".name-match-apply").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const idx = Number(btn.dataset.idx);
+      const select = listEl.querySelector(`.name-match-select[data-idx="${idx}"]`);
+      const value = select.value;
+      if (!value) {
+        showToast(t("nameMatchingNeedSelection"), "warning");
+        return;
+      }
+      btn.disabled = true;
+      const cleanName = normalizeSchoolNameForMatch(unmatched[idx].rawName);
+      if (value === "__new__") {
+        const school = await addMonthlySchool(cleanName);
+        if (typeof enqueueEntitySync === "function") {
+          enqueueEntitySync("school", "create", school.id, { id: school.id, name: school.name });
+        }
+      } else {
+        await updateMonthlySchoolName(value, cleanName);
+      }
+      monthlySchools = await getAllMonthlySchools();
+      showToast(t("nameMatchingApplied"), "success");
+      // Re-run validation so the remaining rows' pickers (and which
+      // rows still show up at all) reflect this change immediately.
+      lastMasterValidation = await validateMasterSchoolsPptx(currentMonthKey);
+      renderNameMatchingScreen();
+    });
+  });
+}
+
+document.getElementById("nameMatchingRecheckBtn").addEventListener("click", async () => {
+  await runMasterValidationAndShowSummary();
+});
+document.getElementById("nameMatchingBackBtn").addEventListener("click", async () => {
+  await runMasterValidationAndShowSummary();
 });
 
 document.getElementById("generateMultiPptxBtn").addEventListener("click", async () => {

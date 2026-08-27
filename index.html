@@ -22,7 +22,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=22">
+<link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
 
@@ -469,9 +469,28 @@
 
       <p id="multiMissingNote" class="previous-visit-note" style="display:none;"></p>
 
+      <button id="fixUnmatchedNamesBtn" class="btn btn-secondary" style="display:none;" data-i18n="btnFixUnmatchedNames">🔧 مطابقة الأسماء غير المطابقة</button>
+
       <button id="generateMultiPptxBtn" class="btn btn-primary btn-large" data-i18n="btnGeneratePptxConfirm">توليد PowerPoint</button>
       <p id="multiPptxGeneratingMsg" class="muted" style="display:none;" data-i18n="pptxGenerating">⏳ جاري التوليد...</p>
       <button id="multiSummaryBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
+    </section>
+
+    <!-- SCREEN: fix unmatched template-vs-app school names -- each row
+         is a template school (its exact spelling) with no matching app
+         school; the fix here is always structural (rename an existing
+         app school to the template's own text, or add it as new) never
+         a looser text match, so two different schools can never end up
+         sharing one slide. -->
+    <section id="screen-name-matching" class="screen">
+      <h2 data-i18n="nameMatchingHeading">مطابقة أسماء المدارس مع القالب</h2>
+      <p class="muted" data-i18n="nameMatchingHint">لكل مدرسة أدناه، اربطيها بمدرسة موجودة عندك (يتم تعديل اسمها ليطابق القالب) أو أضيفيها كمدرسة جديدة.</p>
+
+      <div id="nameMatchingList"></div>
+      <p id="nameMatchingDoneMsg" class="empty-msg" style="display:none;" data-i18n="nameMatchingAllDone">تمت مطابقة كل الأسماء 🎉</p>
+
+      <button id="nameMatchingRecheckBtn" class="btn btn-primary btn-large" data-i18n="btnRecheck">إعادة الفحص</button>
+      <button id="nameMatchingBackBtn" class="btn btn-text" data-i18n="btnBack">رجوع</button>
     </section>
 
     <!-- SCREEN: Monthly Template Settings -->
@@ -552,8 +571,8 @@
   <script src="photodoc.js?v=25"></script>
   <script src="pdf.js?v=25"></script>
   <script src="pptx.js?v=26"></script>
-  <script src="app.js?v=26"></script>
+  <script src="app.js?v=27"></script>
   <script src="scenes.js?v=25"></script>
-  <script src="monthly.js?v=27"></script>
+  <script src="monthly.js?v=28"></script>
 </body>
 </html>
