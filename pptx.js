@@ -296,7 +296,11 @@ async function generateMonthlyPptx(school, monthKey) {
   // "documented" preview in-app (see monthly.js's monthlyOverlayLines()),
   // reused as-is so the exported photos carry the same associated
   // metadata as the app already displays for them.
-  const overlayLines = monthlyOverlayLines(school.name, submission.visitDate);
+  // A school with documentation turned off (see monthly.js's per-school
+  // toggle) gets no burned-in name/date overlay at all -- an empty
+  // array here is exactly what cropImageToRatio() already treats as
+  // "no overlay", so this needs no other change anywhere downstream.
+  const overlayLines = school.documentPhotos === false ? [] : monthlyOverlayLines(school.name, submission.visitDate);
   const overlayIsRtl = currentLang === "ar";
 
   // 1) Swap photo bytes — only for slots that actually have a photo.
@@ -400,7 +404,7 @@ async function generateMultiSchoolPptx(schools, monthKey) {
     const school = schools[i];
     const submission = await getMonthlySubmission(school.id, monthKey);
     const byLabel = groupFilledSlotsByLabel(slots, submission);
-    const overlayLines = monthlyOverlayLines(school.name, submission.visitDate);
+    const overlayLines = school.documentPhotos === false ? [] : monthlyOverlayLines(school.name, submission.visitDate);
     const overlayIsRtl = currentLang === "ar";
 
     let slideXml = await applySlideTextReplacements(originalSlideXml, school, monthKey);
@@ -794,7 +798,7 @@ async function generateMasterSchoolsPptx(monthKey) {
     const slots = MASTER_SLOT_MAP[sn].slots;
     const submission = await getMonthlySubmission(school.id, monthKey);
     const byLabel = groupFilledSlotsByLabel(validation.monthlySlots, submission);
-    const overlayLines = monthlyOverlayLines(school.name, submission.visitDate);
+    const overlayLines = school.documentPhotos === false ? [] : monthlyOverlayLines(school.name, submission.visitDate);
 
     // Consumption index per category so multiple slots sharing the same
     // category (e.g. 4 "الأمن والسلامة" slots) each get a distinct
