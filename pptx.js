@@ -653,6 +653,7 @@ async function validateMasterSchoolsPptx(monthKey) {
     slidesWillUpdate: 0,
     slotsUnchangedCount: 0,
     monthlySlots: null,
+    finalSlideOrder: [], // slide numbers in the order they'll be displayed in the output
     zip: null
   };
 
@@ -750,9 +751,68 @@ async function validateMasterSchoolsPptx(monthKey) {
     return result;
   }
 
+  // Display order in the OUTPUT file: same alphabetical (Arabic-locale)
+  // order the app itself already lists schools in (getAllMonthlySchools()'s
+  // own sort) — a matched slide sorts by its app school's name, an
+  // unmatched one falls back to its own template name so the whole deck
+  // still ends up in one single, predictable order instead of leaving
+  // unmatched slides scattered in the template's original (non-
+  // alphabetical) order. This only reorders the slide LIST in
+  // presentation.xml (done in generateMasterSchoolsPptx()) — it never
+  // renames a slide's own files, so every other by-slide-number mapping
+  // above (MASTER_SLOT_MAP, slideMatches, ...) stays correct regardless
+  // of display order.
+  result.finalSlideOrder = slideNumbers
+    .map((sn) => {
+      const m = result.slideMatches[sn];
+      const name = m.matchedSchool ? m.matchedSchool.name : normalizeSchoolNameForMatch(m.rawName);
+      return { sn, name };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "ar"))
+    .map((o) => o.sn);
+
   result.ok = true;
   result.zip = zip;
   return result;
+}
+
+// Rewrites ppt/presentation.xml's <p:sldIdLst> so the deck DISPLAYS in
+// `slideOrder` (a list of slide numbers) — purely a reorder of which
+// slide shows in which position. Never touches a slide's own file
+// (slideN.xml keeps its number, its media, its rels — everything
+// MASTER_SLOT_MAP/slideMatches above key off of stays valid), so this
+// is safe to run as the very last step, after all per-slide content
+// writes are already done. If the template's own <p:sldIdLst> doesn't
+// look exactly as expected, this leaves the original (template) order
+// in place rather than risk writing a broken slide list.
+async function reorderMasterSlides(zip, slideOrder) {
+  const presPath = "ppt/presentation.xml";
+  const presRelsPath = "ppt/_rels/presentation.xml.rels";
+  const presXml = await zip.file(presPath).async("string");
+  const presRelsXml = await zip.file(presRelsPath).async("string");
+
+  const ridToSlideNum = {};
+  for (const m of presRelsXml.matchAll(/<Relationship Id="(rId\d+)"[^>]*Target="slides\/slide(\d+)\.xml"/g)) {
+    ridToSlideNum[m[1]] = Number(m[2]);
+  }
+
+  const sldIdEls = Array.from(presXml.matchAll(/<p:sldId id="\d+" r:id="rId\d+"\/>/g)).map((m) => m[0]);
+  const slideNumToEl = {};
+  for (const el of sldIdEls) {
+    const ridMatch = el.match(/r:id="(rId\d+)"/);
+    const sn = ridMatch && ridToSlideNum[ridMatch[1]];
+    if (sn != null) slideNumToEl[sn] = el;
+  }
+
+  const allPresent = slideOrder.length === sldIdEls.length && slideOrder.every((sn) => slideNumToEl[sn]);
+  if (!allPresent) {
+    console.warn("PPTX: master template's <p:sldIdLst> didn't match the expected shape — leaving slide order unchanged.");
+    return;
+  }
+
+  const newInner = slideOrder.map((sn) => slideNumToEl[sn]).join("");
+  const newPresXml = presXml.replace(/(<p:sldIdLst>)[\s\S]*?(<\/p:sldIdLst>)/, `$1${newInner}$2`);
+  zip.file(presPath, newPresXml);
 }
 
 // Generates the single combined all-schools PowerPoint from
@@ -818,6 +878,8 @@ async function generateMasterSchoolsPptx(monthKey) {
 
     zip.file(`ppt/slides/slide${sn}.xml`, slideXml);
   }
+
+  await reorderMasterSlides(zip, validation.finalSlideOrder);
 
   const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
 
