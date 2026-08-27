@@ -256,7 +256,7 @@ html[dir="ltr"] select { background-position: right 14px center; }
 /* ---------- Surface / card system (shared language for every card type) ---------- */
 .report-card, .obs-card, .field-section, .pptx-summary-card, .monthly-school-card,
 .scene-row, .multi-school-check-row, .recent-visit-card, .monthly-slot-row,
-.monthly-slot-card, .settings-group, .stat-card, .scene-month-history-card {
+.monthly-slot-card, .settings-group, .stat-card, .scene-month-history-card, .name-match-row {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
@@ -609,6 +609,20 @@ html[dir="ltr"] select { background-position: right 14px center; }
 
 .pptx-summary-card { padding: 18px; margin-bottom: 14px; }
 .pptx-summary-card p { margin: 9px 0; font-size: 0.95rem; }
+
+.name-match-row { padding: 14px 15px; margin-bottom: 10px; }
+.name-match-template-name { font-weight: 700; margin-bottom: 8px; }
+.name-match-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.name-match-select {
+  flex: 1; min-width: 180px; padding: 9px 10px; border: 1px solid var(--line);
+  border-radius: var(--r-sm); background: var(--surface); font-size: 0.9rem;
+}
+.name-match-apply {
+  flex: none; padding: 9px 18px; border: none; border-radius: var(--r-sm);
+  background: var(--brand); color: #fff; font-weight: 800;
+}
+.name-match-apply:active { transform: scale(0.96); }
+.name-match-apply:disabled { opacity: 0.6; }
 
 .multi-school-check-row { display: flex; align-items: center; gap: 10px; padding: 13px 15px; margin-bottom: 8px; }
 .multi-school-check-row input[type="checkbox"] { width: 24px; height: 24px; flex-shrink: 0; accent-color: var(--brand); }
