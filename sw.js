@@ -10,7 +10,7 @@
 // cached versions get cleared out automatically on activate.
 // ---------------------------------------------------------------------
 
-const CACHE_NAME = "walaa-safety-v11";
+const CACHE_NAME = "walaa-safety-v10";
 
 const CORE_ASSETS = [
   "/",

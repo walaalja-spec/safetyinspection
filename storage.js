@@ -998,30 +998,6 @@ const DEFAULT_MONTHLY_SLOTS = [
   { category: "الأمن والسلامة", label: "الأمن والسلامة" }
 ];
 
-// The 4 "الأمن والسلامة" slots are now shown to the user as their own
-// later step, labeled "تكييف 1"–"تكييف 4" (see monthly.js's two-step
-// monthly-photos flow). This only relabels a slot whose label is still
-// the untouched original "الأمن والسلامة" — anyone who already renamed
-// it via "إدارة قائمة الصور المطلوبة" keeps their own wording. `category`
-// is deliberately left exactly as it always was on every slot (still
-// "الأمن والسلامة"), since that's the STABLE key pptx.js's
-// groupFilledSlotsByLabel()/PPTX_IMAGE_MAP/MASTER_SLOT_MAP match
-// against — so every existing and future PowerPoint export keeps
-// placing these photos in the exact same template frames it always
-// did, completely unaffected by this relabel. This is a pure display
-// transform, not a migration — nothing is written back to storage, so
-// it costs nothing to apply on every read.
-function relabelUntouchedAcSlots(slots) {
-  let n = 0;
-  return slots.map((s) => {
-    if (s.category === "الأمن والسلامة" && s.label === "الأمن والسلامة") {
-      n += 1;
-      return { ...s, label: `تكييف ${n}` };
-    }
-    return s;
-  });
-}
-
 // Returns the shared checklist of required photo types (same for every school).
 async function getMonthlySlots() {
   const record = await storeGet(MONTHLY_TEMPLATE_STORE, "template");
@@ -1030,11 +1006,9 @@ async function getMonthlySlots() {
     // added/edited without one) falls back to its own label — exactly
     // today's matching behavior, unchanged for anyone who hasn't renamed
     // that slot since.
-    return relabelUntouchedAcSlots(record.slots.map((s) => (s.category ? s : { ...s, category: s.label })));
+    return record.slots.map((s) => (s.category ? s : { ...s, category: s.label }));
   }
-  return relabelUntouchedAcSlots(
-    DEFAULT_MONTHLY_SLOTS.map((def, i) => ({ id: "slot_" + i, label: def.label, category: def.category }))
-  );
+  return DEFAULT_MONTHLY_SLOTS.map((def, i) => ({ id: "slot_" + i, label: def.label, category: def.category }));
 }
 
 async function saveMonthlySlots(slots) {
