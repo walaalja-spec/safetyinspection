@@ -14,6 +14,23 @@ let activeSchool = null;
 let activeSubmission = null;
 let captureSlotId = null;
 
+// Two-step monthly-photos flow: step 1 is every slot except the 4
+// "الأمن والسلامة" ones, step 2 is just those 4 (now labeled "تكييف
+// N" — see storage.js's relabelUntouchedAcSlots()). Grouping by
+// `category` here (never by the user-editable `label`) is what keeps
+// this correct even if the AC slots get renamed again later, and keeps
+// it a pure display split -- the report's own completion count
+// (doneCount/monthlySlots.length, used everywhere else in the app)
+// still spans every slot from both steps, completely unchanged.
+const MONTHLY_STEP2_CATEGORY = "الأمن والسلامة";
+let monthlyStepOverride = null; // 1 | 2 | null (null = auto-derive)
+
+function splitMonthlySlotsIntoSteps(slots) {
+  const step1 = slots.filter((s) => s.category !== MONTHLY_STEP2_CATEGORY);
+  const step2 = slots.filter((s) => s.category === MONTHLY_STEP2_CATEGORY);
+  return { step1, step2 };
+}
+
 function defaultMonthKey() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -230,6 +247,10 @@ async function openSchoolPhotos(schoolId) {
   document.getElementById("monthlySchoolTitle").textContent = activeSchool.name;
   document.getElementById("monthlyVisitDateInput").value = activeSubmission.visitDate || `${currentMonthKey}-01`;
   document.getElementById("monthlyDocumentPhotosToggle").checked = activeSchool.documentPhotos !== false;
+  // Always re-derive which of the two sections to land on (see
+  // splitMonthlySlotsIntoSteps() below) rather than remembering a
+  // manual override across schools/visits.
+  monthlyStepOverride = null;
   await renderMonthlySlotsGrid();
   showScreen("screen-monthly-school");
 }
@@ -261,6 +282,57 @@ function monthlyFileName(school, slot, ext) {
   return `${sanitizeFileNamePart(school.name)}_${sanitizeFileNamePart(slot.label)}_${currentMonthKey}.${ext}`;
 }
 
+// Renders the small header above the grid showing which of the two
+// sections is active, its own "X / Y صور" count, and (only when
+// relevant) a manual link to the other section -- forward once step 1
+// is done, back at any time while on step 2. Does nothing (clears
+// itself) when the school's slot list has no "تكييف"/security
+// category at all, so a custom slot list without that category is
+// completely unaffected.
+function renderMonthlyStepIndicator(activeStep, step1, step2) {
+  const el = document.getElementById("monthlyStepIndicator");
+  if (step2.length === 0) {
+    el.innerHTML = "";
+    return;
+  }
+  const slots = activeStep === 2 ? step2 : step1;
+  const done = slots.filter((s) => activeSubmission.photos[s.id]).length;
+  const title = activeStep === 2 ? t("monthlyAcSectionTitle") : t("monthlyBasicSectionTitle");
+
+  el.innerHTML = `
+    <div class="monthly-step-header">
+      <h3>${escapeHtml(title)}</h3>
+      <span class="monthly-step-badge">${escapeHtml(t("monthlyStepOf")(activeStep, 2))}</span>
+    </div>
+    <p class="muted">${done} / ${slots.length} ${currentLang === "ar" ? "صور" : "photos"}</p>
+    <div class="monthly-step-nav"></div>
+  `;
+
+  const nav = el.querySelector(".monthly-step-nav");
+  const step1Done = step1.length > 0 && step1.every((s) => activeSubmission.photos[s.id]);
+  if (activeStep === 2) {
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "btn btn-text";
+    back.textContent = t("monthlyBackToBasicSection");
+    back.addEventListener("click", () => {
+      monthlyStepOverride = 1;
+      renderMonthlySlotsGrid();
+    });
+    nav.appendChild(back);
+  } else if (step1Done) {
+    const fwd = document.createElement("button");
+    fwd.type = "button";
+    fwd.className = "btn btn-text";
+    fwd.textContent = t("monthlyGoToAcSection");
+    fwd.addEventListener("click", () => {
+      monthlyStepOverride = 2;
+      renderMonthlySlotsGrid();
+    });
+    nav.appendChild(fwd);
+  }
+}
+
 async function renderMonthlySlotsGrid() {
   const grid = document.getElementById("monthlySlotsGrid");
   grid.innerHTML = "";
@@ -279,7 +351,18 @@ async function renderMonthlySlotsGrid() {
     <div class="progress-bar-track"><div class="progress-bar-fill ${isComplete ? "" : "warning"}" style="width:${pct}%"></div></div>
   `;
 
-  for (const slot of monthlySlots) {
+  const { step1, step2 } = splitMonthlySlotsIntoSteps(monthlySlots);
+  const step1Done = step1.length > 0 && step1.every((s) => activeSubmission.photos[s.id]);
+  let activeStep = 1;
+  if (step2.length > 0) {
+    if (monthlyStepOverride === 1) activeStep = 1;
+    else if (monthlyStepOverride === 2 && step1Done) activeStep = 2;
+    else activeStep = step1Done ? 2 : 1;
+  }
+  const activeSlots = activeStep === 2 ? step2 : step1;
+  renderMonthlyStepIndicator(activeStep, step1, step2);
+
+  for (const slot of activeSlots) {
     const entry = activeSubmission.photos[slot.id];
     const card = document.createElement("div");
     card.className = "monthly-slot-card";
