@@ -47,12 +47,32 @@ async function enqueueEntitySync(entityType, op, localRefId, payload) {
 
 // True once a school/visit this item depends on has actually synced --
 // local id === cloud id (client-supplied, see worker.js), so no separate
-// id-translation table is needed; this just checks that a "synced" queue
-// entry exists for that id.
-async function dependencySynced(entityType, localRefId) {
+// id-translation table is needed; this just checks a pre-built index
+// (see buildSyncedIndex()) instead of re-scanning the whole queue.
+function dependencySynced(entityType, localRefId, syncedIndex) {
   if (!localRefId) return true; // no dependency (e.g. a "quick visit" with no school)
+  return syncedIndex.has(entityType + ":" + localRefId);
+}
+
+// Built once per flushSyncQueue() pass (not once per item) -- every item
+// used to call getAllSyncItems() itself for its own dependency check,
+// which meant a pass processing K pending items against a queue that has
+// grown to N total entries (schools/visits/observations/photos accumulate
+// over months of real use) did K full scans of N records, every ~20s.
+// That's the O(pending × total) cost that made both "the app feels like
+// it's hanging" and "sync is slow" get worse the longer the app is used --
+// this brings a pass down to one scan (O(total)) plus cheap Set lookups.
+// Callers mutate this Set as items sync *during* the same pass (see
+// processSyncItem()/processPhotoItem() below) so a visit that just synced
+// is still immediately visible to the observation right after it in the
+// same pass, exactly like the old per-item DB re-query used to allow.
+async function buildSyncedIndex() {
   const all = await getAllSyncItems();
-  return all.some((it) => it.entityType === entityType && it.localRefId === localRefId && it.status === "synced");
+  const idx = new Set();
+  for (const it of all) {
+    if (it.status === "synced") idx.add(it.entityType + ":" + it.localRefId);
+  }
+  return idx;
 }
 
 async function apiFetch(path, options) {
@@ -83,8 +103,11 @@ async function recordAttemptResult(item, result, networkErrMessage) {
   if (SYNC_PERMANENT_STATUS.has(result.status)) {
     // Won't self-heal by retrying the same payload -- stop auto-retrying,
     // but keep the entry (and the already-safe local record) for
-    // visibility/manual follow-up rather than discarding anything.
-    await updateSyncItem(item.id, { status: "failed", lastError: errCode, retryCount: item.retryCount });
+    // visibility/manual follow-up rather than discarding anything. Tagged
+    // `permanent` so pruneOldSyncedItems() can eventually clear it out too
+    // (after a much longer grace period than a synced item gets) instead
+    // of it sitting in the queue -- and getting scanned -- forever.
+    await updateSyncItem(item.id, { status: "failed", lastError: errCode, retryCount: item.retryCount, permanent: true });
     return { done: true, success: false };
   }
   // 401/403 (unexpected here on same-origin) / 5xx -- transient.
@@ -98,11 +121,21 @@ async function recordAttemptResult(item, result, networkErrMessage) {
 // in the { done: false } case the item's status is left exactly as
 // found (still "pending"/"failed"), never "syncing", so a later pass
 // still sees it via getPendingSyncItems().
-async function processSyncItem(item) {
+async function processSyncItem(item, syncedIndex) {
   if (item.op !== "create") {
     // update/delete sync isn't wired up yet -- see PHASE2_MIGRATION_PLAN.md
     // for scope. Leave it in the queue rather than silently dropping it.
     return { done: false };
+  }
+
+  // A permanent failure never increments retryCount (see
+  // recordAttemptResult()), so without this check the backoff test right
+  // below (`retryCount > 0`) would stay false forever and this item would
+  // get a real network attempt retried on *every* ~20s pass, forever --
+  // pure wasted work for a request that can never succeed. It's already
+  // terminal; nothing left to do.
+  if (item.status === "failed" && item.permanent) {
+    return { done: true };
   }
 
   if (item.status === "failed" && item.retryCount > 0) {
@@ -110,7 +143,7 @@ async function processSyncItem(item) {
     if (Date.now() < readyAt) return { done: false };
   }
 
-  if (item.entityType === "photo") return processPhotoItem(item);
+  if (item.entityType === "photo") return processPhotoItem(item, syncedIndex);
 
   let depType = null, depId = null;
   if (item.entityType === "visit" && item.payload.schoolId) {
@@ -118,7 +151,7 @@ async function processSyncItem(item) {
   } else if (item.entityType === "observation") {
     depType = "visit"; depId = item.payload.visitId;
   }
-  if (depType && !(await dependencySynced(depType, depId))) {
+  if (depType && !dependencySynced(depType, depId, syncedIndex)) {
     return { done: false }; // parent hasn't synced yet -- try again next pass
   }
 
@@ -147,6 +180,7 @@ async function processSyncItem(item) {
   const outcome = await recordAttemptResult(item, result, networkErrMessage);
   if (outcome.success) {
     await updateSyncItem(item.id, { status: "synced", cloudId: outcome.data.id, syncedAt: Date.now(), lastError: null });
+    syncedIndex.add(item.entityType + ":" + item.localRefId);
   }
   return { done: outcome.done };
 }
@@ -156,15 +190,15 @@ async function processSyncItem(item) {
 // owner observation must already be synced (D1 needs it to exist before
 // /confirm will accept a reference to it) -- same dependency pattern as
 // observation -> visit.
-async function processPhotoItem(item) {
+async function processPhotoItem(item, syncedIndex) {
   const { photoId, ownerType, ownerId, photoType, contentType, blob } = item.payload;
 
-  if (!(await dependencySynced("observation", ownerId))) {
+  if (!dependencySynced("observation", ownerId, syncedIndex)) {
     return { done: false }; // owning observation hasn't synced yet
   }
   if (!(blob instanceof Blob) || blob.size === 0) {
     // Nothing to retry into existence -- permanent.
-    await updateSyncItem(item.id, { status: "failed", lastError: "missing_blob", retryCount: item.retryCount });
+    await updateSyncItem(item.id, { status: "failed", lastError: "missing_blob", retryCount: item.retryCount, permanent: true });
     return { done: true };
   }
 
@@ -231,6 +265,7 @@ async function processPhotoItem(item) {
       lastError: null,
       payload: { ...item.payload, blob: null }
     });
+    syncedIndex.add(item.entityType + ":" + item.localRefId);
   }
   return { done: confirmOutcome.done };
 }
@@ -282,11 +317,22 @@ async function enqueuePhotosForObservation(observationId, photos) {
 // child only ever waits on a parent synced earlier in the same
 // session), so this never removes an entry something still needs.
 const SYNC_PRUNE_AGE_MS = 24 * 60 * 60 * 1000;
+// A permanently-failed item (see recordAttemptResult()'s `permanent`
+// flag) is kept much longer than a synced one -- it's meant to stay
+// visible for manual follow-up, unlike a synced item that's just
+// bookkeeping -- but "forever" was never the intent, and an item that's
+// sat unresolved for a month is exactly as much dead weight in every
+// getAllSyncItems() scan as an old synced one. 30 days leaves ample time
+// to notice and fix whatever caused it.
+const SYNC_PRUNE_FAILED_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 async function pruneOldSyncedItems() {
   const all = await getAllSyncItems();
-  const cutoff = Date.now() - SYNC_PRUNE_AGE_MS;
+  const syncedCutoff = Date.now() - SYNC_PRUNE_AGE_MS;
+  const failedCutoff = Date.now() - SYNC_PRUNE_FAILED_AGE_MS;
   for (const item of all) {
-    if (item.status === "synced" && item.syncedAt && item.syncedAt < cutoff) {
+    if (item.status === "synced" && item.syncedAt && item.syncedAt < syncedCutoff) {
+      await deleteSyncItem(item.id);
+    } else if (item.status === "failed" && item.permanent && item.updatedAt < failedCutoff) {
       await deleteSyncItem(item.id);
     }
   }
@@ -365,8 +411,9 @@ async function flushSyncQueue() {
   syncInFlight = true;
   try {
     const pending = await getPendingSyncItems();
+    const syncedIndex = await buildSyncedIndex();
     for (const item of pending) {
-      await processSyncItem(item); // records its own status transition either way
+      await processSyncItem(item, syncedIndex); // records its own status transition either way
     }
   } finally {
     syncInFlight = false;
