@@ -338,93 +338,116 @@ async function pruneOldSyncedItems() {
   }
 }
 
-// One-time repair for a historical bug: a visit started from an
-// existing school's page (see enqueueVisitSync() in app.js) was never
-// enqueued for cloud sync at all -- only its observations and photos
-// were. Since an observation waits for its visit to sync first (see
-// processSyncItem's dependency check above), and a dependency that was
-// never enqueued in the first place never resolves, this left those
-// observations (and their photos, waiting on the observations in turn)
-// stuck at "pending" forever -- silently, since a missing dependency
-// returns without ever touching retryCount, so the "stuck" indicator
-// (retryCount >= 5) never fires either.
+// Root-cause fix (2026-09): the sync queue's dependency chain is
+// school <- visit <- observation <- photo, and a gap can appear at ANY
+// link -- a record created before this app had cloud sync at all never
+// got its own sync item, but something created under it later still
+// points at it and waits forever (invisible via retryCount, since a
+// missing dependency returns without ever touching it -- see
+// processSyncItem()'s dependency check above). The original version of
+// this function hand-coded exactly one such gap (an observation's
+// missing visit) as a special case, and a second gap (a visit's missing
+// school) got bolted on next to it -- but only reachable from inside
+// the first case's loop, so a visit that was otherwise fine but had a
+// missing school slipped through entirely (a real production case,
+// found via the sync-health diagnostic). Hand-coding each new gap as
+// it's discovered doesn't scale, so this is now ONE generic mechanism
+// covering every link uniformly: any future gap at any level self-heals
+// the same way, with no new code needed here.
 //
-// Runs once at startup. Repairs two independent gaps that both produce
-// the exact same symptom -- a queue item stuck forever waiting on a
-// dependency that was never enqueued, invisible via retryCount since a
-// missing dependency returns without ever touching it:
-//
-//   1) (original bug) an observation references a visit that was never
-//      enqueued at all.
-//   2) (found via the sync-health diagnostic, 2026-09) a visit
-//      references a school that was never enqueued at all -- e.g. a
-//      school created before cloud sync existed in this app, so it
-//      never got its own "school" sync item, but a visit created under
-//      it since then still points at it and waits forever. This is
-//      checked independently of (1): the visit itself can be perfectly
-//      fine and still be stuck this way if only its school is missing.
-//
-// Either case: looks the real local record up (report, or the school
-// itself) and enqueues it now, letting the normal dependency-ordered
+// SYNC_PARENT_RULES says, for an item's entityType, how to read its
+// parent's (type, id) out of its own payload. For every pending/failed
+// item whose parent has no sync entry at all, the matching recoverXxx
+// function looks the parent up from the one real local source of truth
+// for that type and enqueues it -- letting the normal dependency-ordered
 // sync loop take it from there exactly as if it had been enqueued
-// correctly to begin with. Anything no longer found locally (deleted
-// since) is left alone -- nothing here can invent or duplicate data,
-// only enqueue a sync for something that genuinely still exists on this
-// device.
+// correctly to begin with. Repeats a few passes because recovering one
+// level can reveal a gap at the next level up (e.g. the visit just
+// recovered might itself be missing its school) -- bounded to 5 passes
+// as a safety net, comfortably more than this 3-level chain ever needs.
+// Anything no longer found locally (deleted since) is left exactly
+// as-is -- nothing here can invent or duplicate data, only enqueue a
+// sync for something that demonstrably still exists on this device.
+const SYNC_PARENT_RULES = {
+  visit: (payload) => (payload && payload.schoolId ? { parentType: "school", parentId: payload.schoolId } : null),
+  observation: (payload) => (payload && payload.visitId ? { parentType: "visit", parentId: payload.visitId } : null),
+  photo: (payload) => (payload && payload.ownerId ? { parentType: "observation", parentId: payload.ownerId } : null)
+};
+
+function recoverSchoolPayload(schoolId, schoolById) {
+  const school = schoolById.get(schoolId);
+  return school ? { id: school.id, name: school.name } : null;
+}
+
+async function recoverVisitPayload(reportId) {
+  const report = await getReportById(reportId);
+  if (!report) return null;
+  return { id: report.id, schoolId: report.schoolId || undefined, title: report.title, location: report.location, date: report.date };
+}
+
+// Observations live inside their report's own `observations` array (no
+// independent by-id store), so recovering one means scanning reports --
+// only done if an observation-level gap is actually found, and only
+// once per backfill run (cached in the `reports` closure variable
+// below), not once per missing observation.
+function recoverObservationPayload(observationId, reports) {
+  for (const report of reports) {
+    const obs = (report.observations || []).find((o) => o.id === observationId);
+    if (obs) {
+      return {
+        id: obs.id,
+        visitId: report.id,
+        text: obs.text,
+        spotLocation: obs.spotLocation,
+        category: obs.category || undefined,
+        recommendedAction: obs.recommendedAction || undefined,
+        pendingAi: !!obs.pendingAI
+      };
+    }
+  }
+  return null;
+}
+
 async function backfillMissingParentSyncItems() {
   try {
-    const items = await getAllSyncItems();
-    const knownVisitIds = new Set(items.filter((i) => i.entityType === "visit").map((i) => i.localRefId));
-    const knownSchoolIds = new Set(items.filter((i) => i.entityType === "school").map((i) => i.localRefId));
-
-    const missingVisitIds = new Set();
-    for (const it of items) {
-      if (it.entityType !== "observation") continue;
-      if (it.status !== "pending" && it.status !== "failed") continue;
-      const visitId = it.payload && it.payload.visitId;
-      if (visitId && !knownVisitIds.has(visitId)) missingVisitIds.add(visitId);
-    }
-
-    const missingSchoolIds = new Set();
-    for (const it of items) {
-      if (it.entityType !== "visit") continue;
-      if (it.status !== "pending" && it.status !== "failed") continue;
-      const schoolId = it.payload && it.payload.schoolId;
-      if (schoolId && !knownSchoolIds.has(schoolId)) missingSchoolIds.add(schoolId);
-    }
-
-    if (missingVisitIds.size === 0 && missingSchoolIds.size === 0) return;
+    let items = await getAllSyncItems();
+    const known = new Set(items.map((i) => i.entityType + ":" + i.localRefId));
 
     const schools = await getAllMonthlySchools();
     const schoolById = new Map(schools.map((s) => [s.id, s]));
+    let reports = null; // loaded lazily -- only if an observation-level gap actually turns up
 
-    for (const schoolId of missingSchoolIds) {
-      const school = schoolById.get(schoolId);
-      if (!school) continue; // nothing local to recover -- leave the stuck item as-is rather than guess
-      await enqueueEntitySync("school", "create", school.id, { id: school.id, name: school.name });
-      knownSchoolIds.add(school.id);
-    }
-
-    for (const visitId of missingVisitIds) {
-      const report = await getReportById(visitId);
-      if (!report) continue; // nothing local to recover -- leave the stuck item as-is rather than guess
-
-      if (report.schoolId && !knownSchoolIds.has(report.schoolId)) {
-        const school = schoolById.get(report.schoolId);
-        if (school) {
-          await enqueueEntitySync("school", "create", school.id, { id: school.id, name: school.name });
-          knownSchoolIds.add(school.id);
-        }
+    for (let pass = 0; pass < 5; pass++) {
+      const missing = new Map();
+      for (const it of items) {
+        if (it.status !== "pending" && it.status !== "failed") continue;
+        const rule = SYNC_PARENT_RULES[it.entityType];
+        const dep = rule && rule(it.payload);
+        if (!dep) continue;
+        const key = dep.parentType + ":" + dep.parentId;
+        if (!known.has(key)) missing.set(key, dep);
       }
+      if (missing.size === 0) break;
 
-      await enqueueEntitySync("visit", "create", report.id, {
-        id: report.id,
-        schoolId: report.schoolId || undefined,
-        title: report.title,
-        location: report.location,
-        date: report.date
-      });
-      knownVisitIds.add(report.id);
+      let recoveredAny = false;
+      for (const dep of missing.values()) {
+        let payload = null;
+        if (dep.parentType === "school") {
+          payload = recoverSchoolPayload(dep.parentId, schoolById);
+        } else if (dep.parentType === "visit") {
+          payload = await recoverVisitPayload(dep.parentId);
+        } else if (dep.parentType === "observation") {
+          if (!reports) reports = await getAllReports();
+          payload = recoverObservationPayload(dep.parentId, reports);
+        }
+        if (!payload) continue; // nothing local to recover -- leave the stuck item as-is rather than guess
+
+        await enqueueEntitySync(dep.parentType, "create", dep.parentId, payload);
+        known.add(dep.parentType + ":" + dep.parentId);
+        recoveredAny = true;
+      }
+      if (!recoveredAny) break; // nothing more recoverable this round
+      items = await getAllSyncItems(); // refresh so the next pass can see newly-enqueued parents' own possible gaps
     }
   } catch (err) {
     console.warn("Backfill of missing parent sync items failed (non-critical, will retry next load):", err);
