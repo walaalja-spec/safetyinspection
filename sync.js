@@ -349,14 +349,28 @@ async function pruneOldSyncedItems() {
 // returns without ever touching retryCount, so the "stuck" indicator
 // (retryCount >= 5) never fires either.
 //
-// Runs once at startup: finds every observation sync item whose
-// visitId has no matching visit sync item at all, looks the real report
-// (and its school, if any) up locally, and enqueues them now -- letting
-// the normal dependency-ordered sync loop take it from there exactly as
-// if they'd been enqueued correctly to begin with. A visit/report no
-// longer found locally (deleted since) is left alone; nothing here can
-// invent or duplicate data, only enqueue a sync for something that
-// genuinely still exists on this device.
+// Runs once at startup. Repairs two independent gaps that both produce
+// the exact same symptom -- a queue item stuck forever waiting on a
+// dependency that was never enqueued, invisible via retryCount since a
+// missing dependency returns without ever touching it:
+//
+//   1) (original bug) an observation references a visit that was never
+//      enqueued at all.
+//   2) (found via the sync-health diagnostic, 2026-09) a visit
+//      references a school that was never enqueued at all -- e.g. a
+//      school created before cloud sync existed in this app, so it
+//      never got its own "school" sync item, but a visit created under
+//      it since then still points at it and waits forever. This is
+//      checked independently of (1): the visit itself can be perfectly
+//      fine and still be stuck this way if only its school is missing.
+//
+// Either case: looks the real local record up (report, or the school
+// itself) and enqueues it now, letting the normal dependency-ordered
+// sync loop take it from there exactly as if it had been enqueued
+// correctly to begin with. Anything no longer found locally (deleted
+// since) is left alone -- nothing here can invent or duplicate data,
+// only enqueue a sync for something that genuinely still exists on this
+// device.
 async function backfillMissingParentSyncItems() {
   try {
     const items = await getAllSyncItems();
@@ -370,10 +384,26 @@ async function backfillMissingParentSyncItems() {
       const visitId = it.payload && it.payload.visitId;
       if (visitId && !knownVisitIds.has(visitId)) missingVisitIds.add(visitId);
     }
-    if (missingVisitIds.size === 0) return;
+
+    const missingSchoolIds = new Set();
+    for (const it of items) {
+      if (it.entityType !== "visit") continue;
+      if (it.status !== "pending" && it.status !== "failed") continue;
+      const schoolId = it.payload && it.payload.schoolId;
+      if (schoolId && !knownSchoolIds.has(schoolId)) missingSchoolIds.add(schoolId);
+    }
+
+    if (missingVisitIds.size === 0 && missingSchoolIds.size === 0) return;
 
     const schools = await getAllMonthlySchools();
     const schoolById = new Map(schools.map((s) => [s.id, s]));
+
+    for (const schoolId of missingSchoolIds) {
+      const school = schoolById.get(schoolId);
+      if (!school) continue; // nothing local to recover -- leave the stuck item as-is rather than guess
+      await enqueueEntitySync("school", "create", school.id, { id: school.id, name: school.name });
+      knownSchoolIds.add(school.id);
+    }
 
     for (const visitId of missingVisitIds) {
       const report = await getReportById(visitId);
