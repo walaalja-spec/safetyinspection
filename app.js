@@ -167,6 +167,20 @@ const translations = {
     btnDataDiagnostic: "🔍 فحص البيانات المخزّنة",
     diagnosticHeading: "فحص البيانات المخزّنة",
     diagnosticIntro: "هذه الشاشة للقراءة فقط — تعرض ما هو محفوظ فعليًا على هذا الجهاز الآن، ولا تُعدّل أو تحذف أي شيء.",
+    syncDiagnosticHeading: "صحة المزامنة",
+    syncDiagnosticCounts: (total, synced, pending, failed) =>
+      `الإجمالي: ${total} — متزامن: ${synced} — بالانتظار: ${pending} — فشل: ${failed}`,
+    syncDiagnosticAllClear: "كل شيء متزامن ✅",
+    syncDiagnosticMore: (n) => `و ${n} عنصر إضافي...`,
+    syncEntitySchool: "مدرسة",
+    syncEntityVisit: "زيارة",
+    syncEntityObservation: "ملاحظة",
+    syncEntityPhoto: "صورة",
+    syncReasonOrphaned: "بانتظار عنصر أساسي (مدرسة/زيارة) لم يُسجَّل للمزامنة إطلاقًا",
+    syncReasonWaitingDependency: "بانتظار مزامنة العنصر الأساسي أولًا (طبيعي، مؤقت)",
+    syncReasonTransient: "تعذّرت آخر محاولة، سيُعاد المحاولة تلقائيًا",
+    syncReasonPermanent: "فشل نهائيًا (بيانات غير صالحة)، لن يُعاد إرساله",
+    syncReasonWaitingTurn: "بانتظار دوره في المزامنة",
     diagnosticSearchPlaceholder: "ابحثي باسم المدرسة أو عنوان التقرير (اتركيه فارغًا لعرض الكل)",
     diagnosticSummary: (total, matched) => `إجمالي التقارير المخزّنة: ${total} — المطابقة للبحث: ${matched}`,
     diagnosticNoResults: "لا يوجد تقرير مطابق لهذا البحث.",
@@ -454,6 +468,20 @@ const translations = {
     btnDataDiagnostic: "🔍 Check Stored Data",
     diagnosticHeading: "Check Stored Data",
     diagnosticIntro: "Read-only -- shows exactly what's actually saved on this device right now. Never edits or deletes anything.",
+    syncDiagnosticHeading: "Sync Health",
+    syncDiagnosticCounts: (total, synced, pending, failed) =>
+      `Total: ${total} — synced: ${synced} — pending: ${pending} — failed: ${failed}`,
+    syncDiagnosticAllClear: "Everything is synced ✅",
+    syncDiagnosticMore: (n) => `and ${n} more...`,
+    syncEntitySchool: "School",
+    syncEntityVisit: "Visit",
+    syncEntityObservation: "Observation",
+    syncEntityPhoto: "Photo",
+    syncReasonOrphaned: "Waiting on a parent record (school/visit) that was never queued for sync at all",
+    syncReasonWaitingDependency: "Waiting for its parent to sync first (normal, temporary)",
+    syncReasonTransient: "Last attempt failed, will retry automatically",
+    syncReasonPermanent: "Permanently failed (invalid data), will not be retried",
+    syncReasonWaitingTurn: "Waiting its turn to sync",
     diagnosticSearchPlaceholder: "Search by school name or report title (leave empty to show all)",
     diagnosticSummary: (total, matched) => `Total stored reports: ${total} — matching search: ${matched}`,
     diagnosticNoResults: "No report matches this search.",
@@ -1346,6 +1374,62 @@ document.getElementById("importBackupInput").addEventListener("change", async (e
   }
 });
 
+// ---------- Sync diagnostic (read-only) ----------
+// Built specifically so "sync feels stuck" can be checked directly on
+// the device instead of guessed at: shows the queue's counts and, for
+// anything not yet synced, the actual reason it's waiting -- reading
+// this list off is what turns "المزامنة معلّقة" into an actionable
+// report back (e.g. "orphaned_dependency on 3 observations" points
+// straight at a specific historical bug class, vs "waiting_turn" just
+// meaning it hasn't been this item's turn yet).
+async function renderSyncDiagnostic() {
+  const summaryEl = document.getElementById("syncDiagnosticSummary");
+  const problemsEl = document.getElementById("syncDiagnosticProblems");
+  if (!summaryEl || !problemsEl || typeof getSyncDiagnostics !== "function") return;
+
+  const { counts, total, problems } = await getSyncDiagnostics();
+  summaryEl.textContent = t("syncDiagnosticCounts")(total, counts.synced || 0, counts.pending || 0, counts.failed || 0);
+
+  problemsEl.innerHTML = "";
+  if (problems.length === 0) {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = t("syncDiagnosticAllClear");
+    problemsEl.appendChild(p);
+    return;
+  }
+
+  const entityLabels = {
+    school: t("syncEntitySchool"),
+    visit: t("syncEntityVisit"),
+    observation: t("syncEntityObservation"),
+    photo: t("syncEntityPhoto")
+  };
+  const reasonLabels = {
+    orphaned_dependency: t("syncReasonOrphaned"),
+    waiting_on_dependency: t("syncReasonWaitingDependency"),
+    transient_failure: t("syncReasonTransient"),
+    permanent_failure: t("syncReasonPermanent"),
+    waiting_turn: t("syncReasonWaitingTurn")
+  };
+
+  problems.slice(0, 50).forEach((p) => {
+    const row = document.createElement("p");
+    row.className = "diagnostic-obs-row";
+    const label = (entityLabels[p.entityType] || p.entityType) + " — " + escapeHtml(String(p.label || ""));
+    const reason = reasonLabels[p.reason] || p.reason;
+    const errPart = p.lastError ? ` (${escapeHtml(p.lastError)})` : "";
+    row.textContent = `${label}: ${reason}${errPart}`;
+    problemsEl.appendChild(row);
+  });
+  if (problems.length > 50) {
+    const more = document.createElement("p");
+    more.className = "muted";
+    more.textContent = t("syncDiagnosticMore")(problems.length - 50);
+    problemsEl.appendChild(more);
+  }
+}
+
 // ---------- Data diagnostic (read-only) ----------
 // Built so a report of "missing" notes/photos can be checked directly on
 // the device that has them (no DevTools/Mac needed): reads straight from
@@ -1506,6 +1590,7 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
 document.getElementById("dataDiagnosticBtn").addEventListener("click", () => {
   document.getElementById("diagnosticSearchInput").value = "";
   renderDataDiagnostic("");
+  renderSyncDiagnostic();
   showScreen("screen-data-diagnostic");
 });
 document.getElementById("diagnosticSearchInput").addEventListener("input", (e) => renderDataDiagnostic(e.target.value));

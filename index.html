@@ -89,6 +89,12 @@
       <h2 data-i18n="diagnosticHeading">فحص البيانات المخزّنة</h2>
       <p class="muted" data-i18n="diagnosticIntro">هذه الشاشة للقراءة فقط — تعرض ما هو محفوظ فعليًا على هذا الجهاز الآن، ولا تُعدّل أو تحذف أي شيء.</p>
 
+      <div class="field-section">
+        <h3 class="section-heading" data-i18n="syncDiagnosticHeading">صحة المزامنة</h3>
+        <div id="syncDiagnosticSummary" class="muted"></div>
+        <div id="syncDiagnosticProblems"></div>
+      </div>
+
       <input type="search" id="diagnosticSearchInput" class="search-input" data-i18n-placeholder="diagnosticSearchPlaceholder" placeholder="ابحثي باسم المدرسة أو عنوان التقرير (اتركيه فارغًا لعرض الكل)" autocomplete="off" enterkeyhint="search">
 
       <p id="diagnosticSummary" class="muted"></p>
@@ -572,12 +578,12 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="storage.js?v=27"></script>
-  <script src="sync.js?v=26"></script>
+  <script src="sync.js?v=27"></script>
   <script src="media.js?v=25"></script>
   <script src="photodoc.js?v=25"></script>
   <script src="pdf.js?v=25"></script>
   <script src="pptx.js?v=27"></script>
-  <script src="app.js?v=28"></script>
+  <script src="app.js?v=29"></script>
   <script src="scenes.js?v=25"></script>
   <script src="monthly.js?v=29"></script>
 </body>
