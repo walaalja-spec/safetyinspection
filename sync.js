@@ -401,6 +401,59 @@ async function backfillMissingParentSyncItems() {
   }
 }
 
+// Read-only snapshot of the sync queue for self-service troubleshooting
+// (screen-data-diagnostic) -- never mutates anything, safe to call any
+// time. For every item not yet synced, works out WHY: waiting on a
+// dependency that hasn't synced yet (normal, temporary), waiting on a
+// dependency that isn't in the queue AT ALL (orphaned -- the parent was
+// never enqueued; this is the exact historical bug class
+// backfillMissingParentSyncItems() exists to repair, so seeing this
+// reason here points straight at that), in backoff after a transient
+// failure (network/5xx/401), or permanently failed (bad payload, 404,
+// etc. -- will never succeed by retrying).
+async function getSyncDiagnostics() {
+  const all = await getAllSyncItems();
+  const byKey = new Map();
+  for (const it of all) byKey.set(it.entityType + ":" + it.localRefId, it);
+
+  const counts = { pending: 0, syncing: 0, failed: 0, synced: 0 };
+  const problems = [];
+
+  for (const it of all) {
+    counts[it.status] = (counts[it.status] || 0) + 1;
+    if (it.status === "synced") continue;
+
+    let depType = null, depId = null;
+    if (it.entityType === "visit" && it.payload && it.payload.schoolId) { depType = "school"; depId = it.payload.schoolId; }
+    else if (it.entityType === "observation" && it.payload) { depType = "visit"; depId = it.payload.visitId; }
+    else if (it.entityType === "photo" && it.payload) { depType = "observation"; depId = it.payload.ownerId; }
+
+    let reason;
+    if (it.status === "failed" && it.permanent) {
+      reason = "permanent_failure";
+    } else if (depType && depId) {
+      const dep = byKey.get(depType + ":" + depId);
+      if (!dep) reason = "orphaned_dependency";
+      else if (dep.status !== "synced") reason = "waiting_on_dependency";
+      else reason = it.status === "failed" ? "transient_failure" : "waiting_turn";
+    } else {
+      reason = it.status === "failed" ? "transient_failure" : "waiting_turn";
+    }
+
+    problems.push({
+      entityType: it.entityType,
+      status: it.status,
+      reason,
+      retryCount: it.retryCount,
+      lastError: it.lastError,
+      label: (it.payload && (it.payload.name || it.payload.title || it.payload.text)) || it.localRefId,
+      createdAt: it.createdAt
+    });
+  }
+
+  return { counts, total: all.length, problems };
+}
+
 async function flushSyncQueue() {
   // A flush already running when this fires (e.g. an enqueue's
   // scheduleSyncSoon landing mid-pass) must not just return and drop the
