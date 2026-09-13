@@ -209,6 +209,130 @@ function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000, lines = [
   });
 }
 
+// Longer edge cap for the FULL photo embedded by buildAdjustableSlotPhoto()
+// below -- large enough to give real room to re-crop in PowerPoint, small
+// enough to keep the exported file size sane across dozens of photos.
+const PPTX_PHOTO_MAX_EDGE = 1920;
+
+// Unlike cropImageToRatio() above (which destructively bakes the crop into
+// the pixels — the original framing outside the frame is gone for good),
+// this keeps the FULL source photo and instead computes a standard OOXML
+// <a:srcRect> percentage crop for the shape's own blipFill: the exact same
+// mechanism PowerPoint's native "Crop" tool reads and writes. By default
+// this looks identical to the old cover-crop (same fill-the-frame,
+// centered, never-stretched math), but the user can open the exported
+// slide, hit Crop, and drag the handles to reveal more of the photo or
+// reposition it — nothing about the framing is thrown away.
+//
+// Returns { blob, srcRect: {l,t,r,b} } — srcRect values are OOXML's usual
+// per-mille-percent units (100000 = 100%), 0 meaning "not trimmed on this
+// edge" (and omitted from the XML entirely, matching how sparse the
+// template's own srcRect tags already are).
+function buildAdjustableSlotPhoto(sourceBlob, targetRatio, lines = [], isRtl = true) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = reject;
+    img.onload = () => {
+      const srcRatio = img.width / img.height;
+      let sx, sy, sw, sh;
+      if (srcRatio > targetRatio) {
+        sh = img.height;
+        sw = sh * targetRatio;
+        sx = (img.width - sw) / 2;
+        sy = 0;
+      } else {
+        sw = img.width;
+        sh = sw / targetRatio;
+        sx = 0;
+        sy = (img.height - sh) / 2;
+      }
+
+      const pct = (v) => Math.min(100000, Math.max(0, Math.round(v * 100000)));
+      const srcRect = {
+        l: pct(sx / img.width),
+        t: pct(sy / img.height),
+        r: pct((img.width - (sx + sw)) / img.width),
+        b: pct((img.height - (sy + sh)) / img.height)
+      };
+
+      const scale = Math.min(1, PPTX_PHOTO_MAX_EDGE / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      if (lines && lines.length) {
+        // Sized/positioned relative to the VISIBLE crop window (not the
+        // full photo canvas), so the bar lands exactly where it always
+        // has by default -- only re-cropping in PowerPoint afterward
+        // would move it relative to the new visible area.
+        const csx = sx * scale, csy = sy * scale, csw = sw * scale, csh = sh * scale;
+        const fontSize = Math.max(18, Math.round(csw * 0.032));
+        const lineGap = Math.round(fontSize * 0.5);
+        const paddingY = Math.round(fontSize * 0.6);
+        const barHeight = lines.length * (fontSize + lineGap) + paddingY * 2 - lineGap;
+        const barY = csy + csh - barHeight;
+
+        ctx.lineJoin = "round";
+        ctx.miterLimit = 2;
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.14));
+        ctx.fillStyle = "#ffffff";
+        ctx.direction = isRtl ? "rtl" : "ltr";
+        ctx.textAlign = isRtl ? "right" : "left";
+        ctx.font = `600 ${fontSize}px Geeza Pro, Cairo, Arial, sans-serif`;
+        const paddingX = Math.round(csw * 0.025);
+        let ty = barY + paddingY + fontSize * 0.8;
+        lines.forEach((line) => {
+          const tx = isRtl ? csx + csw - paddingX : csx + paddingX;
+          ctx.strokeText(line, tx, ty);
+          ctx.fillText(line, tx, ty);
+          ty += fontSize + lineGap;
+        });
+      }
+
+      canvas.toBlob(
+        (blob) => (blob ? resolve({ blob, srcRect }) : reject(new Error("toBlob failed"))),
+        "image/jpeg",
+        0.88
+      );
+    };
+    img.src = URL.createObjectURL(sourceBlob);
+  });
+}
+
+// { mediaFileName -> rId } from a slide's own .rels XML — same Target
+// pattern repointRelsTarget() below already searches for.
+function buildMediaRidMap(relsXml) {
+  const map = {};
+  const re = /Id="(rId\d+)"[^>]*Target="\.\.\/media\/([^"]+)"/g;
+  let m;
+  while ((m = re.exec(relsXml))) map[m[2]] = m[1];
+  return map;
+}
+
+// Patches (or inserts) the <a:srcRect> of the ONE picture shape whose blip
+// embeds `rid` — located precisely by that relationship id, never by
+// position or order, so this can never touch a different shape's crop.
+// Every other byte of the slide XML is left exactly as it was; this is a
+// pure string substitution, not a re-parse/re-serialize, matching this
+// file's existing "never touch the slide's shape XML wholesale" approach.
+function applySrcRectForMedia(slideXml, rid, srcRect) {
+  const attrs = ["l", "t", "r", "b"]
+    .filter((k) => srcRect[k])
+    .map((k) => `${k}="${srcRect[k]}"`)
+    .join(" ");
+  const newTag = attrs ? `<a:srcRect ${attrs}/>` : "<a:srcRect/>";
+  const re = new RegExp(`(<a:blip r:embed="${rid}"[^>]*(?:/>|>[\\s\\S]*?</a:blip>))(<a:srcRect[^>]*/>)?(<a:stretch>)`);
+  if (!re.test(slideXml)) {
+    console.warn(`PPTX: could not locate blip/srcRect for ${rid} — crop left as the template's original.`);
+    return slideXml;
+  }
+  return slideXml.replace(re, `$1${newTag}$3`);
+}
+
 // Builds { category -> [{slotId, entry}] } from the current slots list
 // and submission, preserving slot order, only for slots that actually
 // have a saved photo. Grouped by the slot's stable `category` (falling
@@ -298,28 +422,36 @@ async function generateMonthlyPptx(school, monthKey) {
   // metadata as the app already displays for them.
   // A school with documentation turned off (see monthly.js's per-school
   // toggle) gets no burned-in name/date overlay at all -- an empty
-  // array here is exactly what cropImageToRatio() already treats as
-  // "no overlay", so this needs no other change anywhere downstream.
+  // array here is exactly what buildAdjustableSlotPhoto() already treats
+  // as "no overlay", so this needs no other change anywhere downstream.
   const overlayLines = school.documentPhotos === false ? [] : monthlyOverlayLines(school.name, submission.visitDate);
   const overlayIsRtl = currentLang === "ar";
 
+  const slidePath = "ppt/slides/slide1.xml";
+  const relsPath = "ppt/slides/_rels/slide1.xml.rels";
+  let slideXml = await zip.file(slidePath).async("string");
+  const mediaRidMap = buildMediaRidMap(await zip.file(relsPath).async("string"));
+
   // 1) Swap photo bytes — only for slots that actually have a photo.
   //    Missing ones keep the template's original example photo, by design.
+  //    The FULL photo is embedded and cropped via the shape's own srcRect
+  //    (see buildAdjustableSlotPhoto()) rather than baked into the pixels,
+  //    so the user can still re-crop or reposition it in PowerPoint.
   for (const [label, targets] of Object.entries(PPTX_IMAGE_MAP)) {
     const filled = byLabel[label] || [];
     for (let i = 0; i < targets.length; i++) {
       const filledEntry = filled[i];
       if (!filledEntry) continue; // leave this specific frame's original photo untouched
       const target = targets[i];
-      const cropped = await cropImageToRatio(filledEntry.entry.blob, target.ratio, 1000, overlayLines, overlayIsRtl);
-      const arrayBuf = await cropped.arrayBuffer();
+      const { blob: photoBlob, srcRect } = await buildAdjustableSlotPhoto(filledEntry.entry.blob, target.ratio, overlayLines, overlayIsRtl);
+      const arrayBuf = await photoBlob.arrayBuffer();
       zip.file(`ppt/media/${target.media}`, arrayBuf);
+      const rid = mediaRidMap[target.media];
+      if (rid) slideXml = applySrcRectForMedia(slideXml, rid, srcRect);
     }
   }
 
   // 2) Replace the two text fields, in the slide XML.
-  const slidePath = "ppt/slides/slide1.xml";
-  let slideXml = await zip.file(slidePath).async("string");
   slideXml = await applySlideTextReplacements(slideXml, school, monthKey);
   zip.file(slidePath, slideXml);
 
@@ -799,6 +931,7 @@ async function generateMasterSchoolsPptx(monthKey) {
     const submission = await getMonthlySubmission(school.id, monthKey);
     const byLabel = groupFilledSlotsByLabel(validation.monthlySlots, submission);
     const overlayLines = school.documentPhotos === false ? [] : monthlyOverlayLines(school.name, submission.visitDate);
+    const mediaRidMap = buildMediaRidMap(await zip.file(`ppt/slides/_rels/slide${sn}.xml.rels`).async("string"));
 
     // Consumption index per category so multiple slots sharing the same
     // category (e.g. 4 "الأمن والسلامة" slots) each get a distinct
@@ -812,12 +945,18 @@ async function generateMasterSchoolsPptx(monthKey) {
       const filledEntry = filledForCat[i];
       if (!filledEntry) continue; // section 6: keep this slide's original master photo untouched
 
-      const cropped = await cropImageToRatio(filledEntry.entry.blob, slot.r, 1000, overlayLines, overlayIsRtl);
-      const arrayBuf = await cropped.arrayBuffer();
+      // The FULL photo is embedded and cropped via the shape's own
+      // srcRect (see buildAdjustableSlotPhoto()) rather than baked into
+      // the pixels, so the user can still re-crop or reposition it in
+      // PowerPoint after export.
+      const { blob: photoBlob, srcRect } = await buildAdjustableSlotPhoto(filledEntry.entry.blob, slot.r, overlayLines, overlayIsRtl);
+      const arrayBuf = await photoBlob.arrayBuffer();
       // This slide's OWN media file only (see MASTER_SLOT_MAP's comment)
       // — never a filename shared with any other slide, and never one
       // of the 3 header-logo files (which never appear in this map).
       zip.file(`ppt/media/${slot.m}`, arrayBuf);
+      const rid = mediaRidMap[slot.m];
+      if (rid) slideXml = applySrcRectForMedia(slideXml, rid, srcRect);
     }
 
     zip.file(`ppt/slides/slide${sn}.xml`, slideXml);
