@@ -1,0 +1,14 @@
+.wrangler
+.git
+.github
+.agents
+.claude
+node_modules
+migrations
+scripts
+PHASE2_MIGRATION_PLAN.md
+TXT
+wrangler.toml
+.dev.vars
+.gitignore
+.assetsignore

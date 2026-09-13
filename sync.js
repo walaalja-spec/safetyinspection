@@ -22,10 +22,38 @@ const SYNC_MAX_BACKOFF_MS = 60000;
 // the payload itself is the problem, not a transient condition.
 const SYNC_PERMANENT_STATUS = new Set([400, 404, 409, 413, 415, 422]);
 
+// A stalled connection (flaky mobile network, captive portal, a proxy that
+// accepts the socket but never answers) can leave a bare fetch() pending
+// indefinitely -- browsers do not time these out on their own. Every sync
+// network call runs inside flushSyncQueue()'s single sequential loop under
+// the syncInFlight guard, so ONE such stuck request doesn't just fail that
+// item -- it wedges the entire queue forever: syncInFlight never clears,
+// so every later flush (the 20s tick, 'online', a fresh enqueue) just
+// re-schedules instead of making progress, with no error ever surfaced.
+// This is what "sync just hangs" looks like from the outside. Wrapping
+// every call site in a hard timeout guarantees the loop always keeps
+// moving -- a timeout is recorded exactly like any other network error
+// (transient, retried with the same backoff), never a silent stall.
+const SYNC_FETCH_TIMEOUT_MS = 25000;
+const SYNC_UPLOAD_TIMEOUT_MS = 60000; // photo bytes can legitimately take longer
+
 let syncInFlight = false;
 
 function syncBackoffMs(retryCount) {
   return Math.min(1000 * Math.pow(2, retryCount), SYNC_MAX_BACKOFF_MS);
+}
+
+async function fetchWithTimeout(path, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(path, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error("timed_out");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Queues an already-saved local record for background cloud sync. Called
@@ -76,7 +104,7 @@ async function buildSyncedIndex() {
 }
 
 async function apiFetch(path, options) {
-  const res = await fetch(path, options);
+  const res = await fetchWithTimeout(path, options, SYNC_FETCH_TIMEOUT_MS);
   let json = null;
   try { json = await res.json(); } catch (e) { /* non-JSON response */ }
   return { status: res.status, ok: res.ok, json };
@@ -207,11 +235,11 @@ async function processPhotoItem(item, syncedIndex) {
   const qs = new URLSearchParams({ ownerType, ownerId, photoType, photoId });
   let uploadResult, uploadErrMessage;
   try {
-    const res = await fetch(`/api/photos/upload?${qs.toString()}`, {
+    const res = await fetchWithTimeout(`/api/photos/upload?${qs.toString()}`, {
       method: "POST",
       headers: { "Content-Type": contentType || "application/octet-stream" },
       body: blob
-    });
+    }, SYNC_UPLOAD_TIMEOUT_MS);
     let json = null;
     try { json = await res.json(); } catch (e) { /* non-JSON */ }
     uploadResult = { status: res.status, ok: res.ok, json };
