@@ -209,32 +209,20 @@ function cropImageToRatio(sourceBlob, targetRatio, targetWidth = 1000, lines = [
   });
 }
 
-// Longer edge cap for the photo embedded by buildAdjustableSlotPhoto()
+// Longer edge cap for the FULL photo embedded by buildAdjustableSlotPhoto()
 // below -- large enough to give real room to re-crop in PowerPoint, small
 // enough to keep the exported file size sane across dozens of photos.
 const PPTX_PHOTO_MAX_EDGE = 1920;
 
-// How far past the visible crop window to still embed, as a fraction of
-// that window's own width/height on EACH side (clamped to the source
-// photo's actual bounds). Embedding the entire original frame (margin=1,
-// effectively) gave real re-crop freedom but roughly doubled every
-// photo's file size in practice -- most of that extra data is well
-// outside anything a normal "nudge the crop a bit" edit would ever
-// reach. 0.35 keeps generous room to reposition or reveal more of the
-// photo along any edge without carrying the whole original frame.
-const PPTX_PHOTO_CROP_MARGIN = 0.35;
-
 // Unlike cropImageToRatio() above (which destructively bakes the crop into
 // the pixels — the original framing outside the frame is gone for good),
-// this embeds the visible crop window PLUS a margin (see
-// PPTX_PHOTO_CROP_MARGIN) and computes a standard OOXML <a:srcRect>
-// percentage crop for the shape's own blipFill: the exact same mechanism
-// PowerPoint's native "Crop" tool reads and writes. By default this looks
-// identical to the old cover-crop (same fill-the-frame, centered,
-// never-stretched math), but the user can open the exported slide, hit
-// Crop, and drag the handles to reveal more of the photo within that
-// margin or reposition it — without paying for the whole original frame's
-// pixels on every photo.
+// this keeps the FULL source photo and instead computes a standard OOXML
+// <a:srcRect> percentage crop for the shape's own blipFill: the exact same
+// mechanism PowerPoint's native "Crop" tool reads and writes. By default
+// this looks identical to the old cover-crop (same fill-the-frame,
+// centered, never-stretched math), but the user can open the exported
+// slide, hit Crop, and drag the handles to reveal more of the photo or
+// reposition it — nothing about the framing is thrown away.
 //
 // Returns { blob, srcRect: {l,t,r,b} } — srcRect values are OOXML's usual
 // per-mille-percent units (100000 = 100%), 0 meaning "not trimmed on this
@@ -259,39 +247,28 @@ function buildAdjustableSlotPhoto(sourceBlob, targetRatio, lines = [], isRtl = t
         sy = (img.height - sh) / 2;
       }
 
-      // The region actually embedded: the crop window plus a margin,
-      // clamped to the source photo's own bounds.
-      const ex = Math.min(sx, sw * PPTX_PHOTO_CROP_MARGIN);
-      const ey = Math.min(sy, sh * PPTX_PHOTO_CROP_MARGIN);
-      const ex2 = Math.min(img.width - (sx + sw), sw * PPTX_PHOTO_CROP_MARGIN);
-      const ey2 = Math.min(img.height - (sy + sh), sh * PPTX_PHOTO_CROP_MARGIN);
-      const embedX = sx - ex, embedY = sy - ey;
-      const embedW = sw + ex + ex2, embedH = sh + ey + ey2;
-
-      // srcRect is relative to the EMBEDDED region, not the original
-      // photo, since only the embedded region ships in the file.
       const pct = (v) => Math.min(100000, Math.max(0, Math.round(v * 100000)));
       const srcRect = {
-        l: pct((sx - embedX) / embedW),
-        t: pct((sy - embedY) / embedH),
-        r: pct((embedX + embedW - (sx + sw)) / embedW),
-        b: pct((embedY + embedH - (sy + sh)) / embedH)
+        l: pct(sx / img.width),
+        t: pct(sy / img.height),
+        r: pct((img.width - (sx + sw)) / img.width),
+        b: pct((img.height - (sy + sh)) / img.height)
       };
 
-      const scale = Math.min(1, PPTX_PHOTO_MAX_EDGE / Math.max(embedW, embedH));
+      const scale = Math.min(1, PPTX_PHOTO_MAX_EDGE / Math.max(img.width, img.height));
       const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(embedW * scale));
-      canvas.height = Math.max(1, Math.round(embedH * scale));
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
       const ctx = canvas.getContext("2d");
       ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(img, embedX, embedY, embedW, embedH, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       if (lines && lines.length) {
         // Sized/positioned relative to the VISIBLE crop window (not the
-        // embedded canvas), so the bar lands exactly where it always has
-        // by default -- only re-cropping in PowerPoint afterward would
-        // move it relative to the new visible area.
-        const csx = (sx - embedX) * scale, csy = (sy - embedY) * scale, csw = sw * scale, csh = sh * scale;
+        // full photo canvas), so the bar lands exactly where it always
+        // has by default -- only re-cropping in PowerPoint afterward
+        // would move it relative to the new visible area.
+        const csx = sx * scale, csy = sy * scale, csw = sw * scale, csh = sh * scale;
         const fontSize = Math.max(18, Math.round(csw * 0.032));
         const lineGap = Math.round(fontSize * 0.5);
         const paddingY = Math.round(fontSize * 0.6);
@@ -319,7 +296,7 @@ function buildAdjustableSlotPhoto(sourceBlob, targetRatio, lines = [], isRtl = t
       canvas.toBlob(
         (blob) => (blob ? resolve({ blob, srcRect }) : reject(new Error("toBlob failed"))),
         "image/jpeg",
-        0.82
+        0.88
       );
     };
     img.src = URL.createObjectURL(sourceBlob);
